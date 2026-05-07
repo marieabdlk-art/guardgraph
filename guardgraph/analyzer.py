@@ -16,7 +16,7 @@ class GuardGraphAnalyzer:
     obligations, matches observed guards, and reports structural gaps.
     """
 
-    VERSION = "0.4.1"
+    VERSION = "0.4.2"
 
     def __init__(self, extractor: FastAPIEndpointExtractor):
         self.extractor = extractor
@@ -41,6 +41,8 @@ class GuardGraphAnalyzer:
         params = self.extract_params(fn)
         guards = self.detect_guards(fn, ep)
         operations = self.detect_operations(fn, ep)
+        upload_ops = self.detect_upload_operations(fn, ep, params)
+        operations.extend(upload_ops)
         sinks = self.detect_sinks(fn, ep)
         raw_inputs = self.detect_raw_inputs(fn, ep)
         validators = self.detect_validators(fn, params)
@@ -51,6 +53,7 @@ class GuardGraphAnalyzer:
             "role": [g for g in guards if g.type in {"ROLE_GATE", "ADMIN_GATE"}],
             "ownership": [g for g in guards if g.type == "OWNERSHIP_CHECK"],
             "operations": operations,
+            "upload_ops": upload_ops,
             "sinks": sinks,
             "raw_inputs": raw_inputs,
             "validators": validators,
@@ -109,10 +112,13 @@ class GuardGraphAnalyzer:
         validators: list[ObservedGuard] = []
         for param in params:
             annotation = param.get("annotation") or ""
+            default = param.get("default") or ""
             if annotation in self.extractor.pydantic_models:
                 validators.append(ObservedGuard("PYDANTIC_VALIDATION", "<signature>", getattr(fn, "lineno", 0), f"{param['name']}: {annotation}", "HIGH"))
             elif annotation in {"int", "str", "float", "bool"}:
                 validators.append(ObservedGuard("TYPE_VALIDATION", "<signature>", getattr(fn, "lineno", 0), f"{param['name']}: {annotation}", "MEDIUM"))
+            elif "UploadFile" in annotation and "File(" in default:
+                validators.append(ObservedGuard("FASTAPI_UPLOAD_BINDING", "<signature>", getattr(fn, "lineno", 0), f"{param['name']}: {annotation} = {default}", "MEDIUM"))
         return validators
 
     def detect_operations(self, fn: ast.AST, ep: Endpoint) -> list[Operation]:
@@ -129,13 +135,36 @@ class GuardGraphAnalyzer:
                 ops.append(Operation("PAYMENT_OP", name, ep.file, line, src, 1.0))
             elif any(k in low for k in ["delete", "remove", "destroy"]):
                 ops.append(Operation("DELETE_OP", name, ep.file, line, src, 1.0))
-            elif any(k in low for k in ["update", "insert", "create", "save", "add", "execute"]):
+            elif any(k in low for k in ["update", "insert", "create", "save", "add", "execute", "install", "uninstall", "refresh"]):
                 if node.args:
                     arg_src = " ".join(node_to_source(a).lower() for a in node.args[:1])
                     if any(sql in arg_src for sql in ["update ", "insert ", "delete ", "create "]):
                         ops.append(Operation("WRITE_OP", name, ep.file, line, src, 0.8))
                     elif "select " in arg_src:
                         ops.append(Operation("READ_OP", name, ep.file, line, src, 0.3))
+                    elif any(k in low for k in ["install", "uninstall", "refresh", "upload"]):
+                        ops.append(Operation("WRITE_OP", name, ep.file, line, src, 0.8))
+        return ops
+
+    def detect_upload_operations(self, fn: ast.AST, ep: Endpoint, params: list[dict[str, Any]]) -> list[Operation]:
+        ops: list[Operation] = []
+        upload_params = [p for p in params if "UploadFile" in (p.get("annotation") or "") or "File(" in (p.get("default") or "")]
+        if upload_params:
+            evidence = ", ".join(f"{p['name']}: {p.get('annotation') or '?'} = {p.get('default') or '?'}" for p in upload_params)
+            ops.append(Operation("UPLOAD_OP", "fastapi.upload", ep.file, ep.line, evidence, 0.95))
+
+        decorator_ids = self._decorator_call_ids(fn)
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call) or id(node) in decorator_ids:
+                continue
+            name = get_call_name(node)
+            low = name.lower()
+            src = node_to_source(node)
+            line = getattr(node, "lineno", ep.line)
+            if any(k in low for k in ["upload", "save_file", "write_file"]):
+                ops.append(Operation("UPLOAD_OP", name, ep.file, line, src, 1.0))
+            if any(k in low for k in ["refresh_plugins", "install_plugin", "upload_my_plugin"]):
+                ops.append(Operation("PLUGIN_MUTATION_OP", name, ep.file, line, src, 1.0))
         return ops
 
     def detect_sinks(self, fn: ast.AST, ep: Endpoint) -> list[Operation]:
@@ -163,7 +192,7 @@ class GuardGraphAnalyzer:
             if id(node) in decorator_ids:
                 continue
             src = node_to_source(node)
-            if contains_keywords(src, ["request.json", "request.body", "request.query", "request.headers", "request.form"]):
+            if contains_keywords(src, ["request.json", "request.body", "request.query", "request.headers", "request.form", "UploadFile", "File(...)"]):
                 raw.append({"file": ep.file, "line": getattr(node, "lineno", ep.line), "evidence": src})
         return raw
 
@@ -173,6 +202,8 @@ class GuardGraphAnalyzer:
         text = f"{path_low} {handler_low}"
         op_types = {op.type for op in facts["operations"]}
 
+        if "UPLOAD_OP" in op_types or any(k in text for k in ["upload", "plugin"]):
+            return "UPLOAD_ACTION"
         if ep.method == "POST" and any(k in text for k in ["signup", "sign_up", "register", "registration", "create_user", "/api/users/"]):
             return "USER_REGISTRATION_ACTION"
         if any(k in text for k in ["login", "signin", "sign_in", "token"]):
@@ -213,6 +244,10 @@ class GuardGraphAnalyzer:
                 obligations.append("SAFE_SINK_REQUIRED")
             return obligations
 
+        if action == "UPLOAD_ACTION":
+            obligations.extend(["AUTH_REQUIRED", "ROLE_OR_PERMISSION_REQUIRED", "UPLOAD_VALIDATION_REQUIRED"])
+            return obligations
+
         if action in {"USER_RESOURCE_READ", "USER_RESOURCE_MUTATION", "DESTRUCTIVE_ACTION", "PAYMENT_ACTION", "ADMIN_ACTION", "STATE_MUTATION"}:
             obligations.append("AUTH_REQUIRED")
         if action in {"USER_RESOURCE_READ", "USER_RESOURCE_MUTATION"}:
@@ -235,6 +270,8 @@ class GuardGraphAnalyzer:
             gaps.append("OWNERSHIP_REQUIRED")
         if "VALIDATION_REQUIRED" in obligations and not facts["validators"]:
             gaps.append("VALIDATION_REQUIRED")
+        if "UPLOAD_VALIDATION_REQUIRED" in obligations and not any(v.type in {"UPLOAD_EXTENSION_CHECK", "UPLOAD_CONTENT_TYPE_CHECK", "UPLOAD_SIZE_CHECK"} for v in facts["validators"]):
+            gaps.append("UPLOAD_VALIDATION_REQUIRED")
         if "ROLE_OR_PERMISSION_REQUIRED" in obligations and not facts["role"]:
             gaps.append("ROLE_OR_PERMISSION_REQUIRED")
         if "ROLE_OR_OWNERSHIP_REQUIRED" in obligations and not (facts["role"] or facts["ownership"]):
@@ -247,9 +284,14 @@ class GuardGraphAnalyzer:
         out: list[Finding] = []
         legit_public_actions = {"USER_REGISTRATION_ACTION", "AUTH_SESSION_ACTION", "PASSWORD_RESET_ACTION", "PUBLIC_CONTACT_ACTION"}
 
+        if ep.action_class == "UPLOAD_ACTION" and any(g in gaps for g in ["AUTH_REQUIRED", "ROLE_OR_PERMISSION_REQUIRED", "UPLOAD_VALIDATION_REQUIRED"]):
+            level = "CRITICAL" if "AUTH_REQUIRED" in gaps else "HIGH"
+            score = 0.94 if level == "CRITICAL" else 0.76
+            out.append(self.make_finding(ep, facts, "UNRESTRICTED_UPLOAD_BOUNDARY", "Открытая загрузка", level, score, "Upload or plugin mutation action is reachable without visible upload-specific security boundaries.", [g for g in ["AUTH_REQUIRED", "ROLE_OR_PERMISSION_REQUIRED", "UPLOAD_VALIDATION_REQUIRED"] if g in gaps]))
+
         if (
             ep.action_class not in legit_public_actions
-            and ep.action_class not in {"PAYMENT_ACTION", "ADMIN_ACTION", "SEARCH_ACTION"}
+            and ep.action_class not in {"PAYMENT_ACTION", "ADMIN_ACTION", "SEARCH_ACTION", "UPLOAD_ACTION"}
             and "AUTH_REQUIRED" in gaps
             and any(op.type in {"WRITE_OP", "DELETE_OP", "PAYMENT_OP"} for op in facts["operations"])
         ):
@@ -322,6 +364,7 @@ class GuardGraphAnalyzer:
             "RAW_INPUT_TO_SINK": "Use schema validation and safe parameterized APIs instead of raw string-built queries.",
             "CRITICAL_ACTION_WEAK_ZONE": "Require authentication and explicit role/permission checks for payment/admin/destructive actions.",
             "PUBLIC_ACTION_UNVALIDATED": "Add schema validation and abuse protection for this public endpoint.",
+            "UNRESTRICTED_UPLOAD_BOUNDARY": "Require authentication, explicit permission checks, file type/size validation, and safe upload handling before accepting uploaded files or plugin packages.",
         }.get(metric, "Review the missing security obligation.")
 
     def generate_report(self, findings: list[Finding]) -> dict[str, Any]:
@@ -340,6 +383,6 @@ class GuardGraphAnalyzer:
             "findings": [finding.to_dict() for finding in findings],
             "summary": {
                 "top_risks": [finding.id for finding in findings[:5]],
-                "architectural_recommendation": "Add centralized auth, ownership checks for user-owned resources, and safe validated data access patterns.",
+                "architectural_recommendation": "Add centralized auth, ownership checks for user-owned resources, upload validation, and safe validated data access patterns.",
             },
         }
