@@ -38,11 +38,15 @@ def test_safe_update_order_is_not_flagged():
 def test_report_shape():
     report = analyze_path(ROOT)
     assert report["meta"]["tool"] == "guardgraph"
-    assert report["meta"]["version"] == "0.4.0"
+    assert report["meta"]["version"] == "0.4.1"
     assert report["meta"]["statistics"]["endpoints_found"] >= 10
     assert isinstance(report["findings"], list)
     first = report["findings"][0]
     assert "title" in first
+    assert "owasp_category" in first
+    assert first["owasp_category"].startswith("A")
+    assert "cwe" in first
+    assert first["cwe"]
     assert first["review_required"] is True
     assert first["exploit_confirmed"] is False
     assert first["evidence_strength"] in {"STRONG", "PARTIAL"}
@@ -73,7 +77,10 @@ def test_config_mode_writes_json_and_markdown(tmp_path):
     assert report["meta"]["statistics"]["endpoints_found"] >= 10
     assert json_path.exists()
     assert md_path.exists()
-    assert "# GuardGraph Report" in md_path.read_text(encoding="utf-8")
+    markdown = md_path.read_text(encoding="utf-8")
+    assert "# GuardGraph Report" in markdown
+    assert "**OWASP:**" in markdown
+    assert "**CWE:**" in markdown
 
 
 def test_sarif_output(tmp_path):
@@ -86,4 +93,10 @@ def test_sarif_output(tmp_path):
     run = sarif["runs"][0]
     assert run["tool"]["driver"]["name"] == "GuardGraph"
     assert run["results"]
-    assert run["results"][0]["properties"]["review_required"] is True
+    first_result = run["results"][0]
+    assert first_result["properties"]["review_required"] is True
+    assert first_result["properties"]["owasp_category"].startswith("A")
+    assert first_result["properties"]["cwe"]
+    first_rule = run["tool"]["driver"]["rules"][0]
+    assert first_rule["properties"]["owasp_category"].startswith("A")
+    assert first_rule["properties"]["cwe"]
