@@ -3,6 +3,7 @@ name: GuardGraph tests
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -18,6 +19,17 @@ jobs:
         run: pytest -q
       - name: Run GuardGraph demo
         run: python -m guardgraph.cli tests/test_app -o guardgraph_report.json
+      - name: Print GuardGraph report in logs
+        run: |
+          echo "===== GUARDGRAPH REPORT ====="
+          cat guardgraph_report.json
+      - name: Add GuardGraph summary
+        run: |
+          echo "# GuardGraph report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat guardgraph_report.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
       - name: Upload GuardGraph report
         uses: actions/upload-artifact@v4
         with:
