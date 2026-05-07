@@ -1,0 +1,144 @@
+name: "GuardGraph"
+description: "Structural AppSec analysis for Python/FastAPI applications"
+
+inputs:
+  config-path:
+    description: "Path to GuardGraph config file"
+    required: false
+    default: "guardgraph.yml"
+  target-path:
+    description: "Target path to scan directly. If empty, config mode is used."
+    required: false
+    default: ""
+  json-output:
+    description: "JSON report output path"
+    required: false
+    default: "guardgraph_report.json"
+  markdown-output:
+    description: "Markdown report output path"
+    required: false
+    default: "guardgraph_report.md"
+  python-version:
+    description: "Python version"
+    required: false
+    default: "3.11"
+  pr-comment:
+    description: "Post or update a PR comment with the GuardGraph report"
+    required: false
+    default: "false"
+  upload-artifacts:
+    description: "Upload JSON/Markdown reports as workflow artifacts"
+    required: false
+    default: "true"
+
+outputs:
+  json-report:
+    description: "Path to JSON report"
+    value: ${{ inputs.json-output }}
+  markdown-report:
+    description: "Path to Markdown report"
+    value: ${{ inputs.markdown-output }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install GuardGraph
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip
+        python -m pip install "${{ github.action_path }}"
+
+    - name: Run GuardGraph
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -n "${{ inputs.target-path }}" ]; then
+          echo "Running GuardGraph in direct target mode..."
+          python -m guardgraph "${{ inputs.target-path }}" \
+            -o "${{ inputs.json-output }}" \
+            -m "${{ inputs.markdown-output }}"
+        else
+          echo "Running GuardGraph in config mode..."
+          python -m guardgraph --config "${{ inputs.config-path }}"
+        fi
+
+    - name: Print Markdown report to logs
+      shell: bash
+      run: |
+        echo "===== GUARDGRAPH MARKDOWN REPORT ====="
+        if [ -f "${{ inputs.markdown-output }}" ]; then
+          cat "${{ inputs.markdown-output }}"
+        else
+          echo "Markdown report not found at ${{ inputs.markdown-output }}"
+        fi
+
+    - name: Add report to job summary
+      shell: bash
+      run: |
+        if [ -f "${{ inputs.markdown-output }}" ]; then
+          cat "${{ inputs.markdown-output }}" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "_Markdown report not found at \`${{ inputs.markdown-output }}\`_" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload GuardGraph artifacts
+      if: ${{ inputs.upload-artifacts == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: guardgraph-report
+        path: |
+          ${{ inputs.json-output }}
+          ${{ inputs.markdown-output }}
+        if-no-files-found: warn
+
+    - name: Post or update PR comment
+      if: ${{ inputs.pr-comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        REPORT_PATH: ${{ inputs.markdown-output }}
+      with:
+        github-token: ${{ github.token }}
+        script: |
+          const fs = require("fs");
+          const marker = "<!-- guardgraph-report -->";
+          const reportPath = process.env.REPORT_PATH;
+
+          if (!fs.existsSync(reportPath)) {
+            core.warning(`Report file not found: ${reportPath}`);
+            return;
+          }
+
+          const reportBody = fs.readFileSync(reportPath, "utf8");
+          const body = `${marker}\n\n${reportBody}`;
+
+          const { owner, repo } = context.repo;
+          const issue_number = context.payload.pull_request.number;
+
+          const comments = await github.paginate(
+            github.rest.issues.listComments,
+            { owner, repo, issue_number, per_page: 100 }
+          );
+
+          const existing = comments.find(comment => comment.body && comment.body.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: existing.id,
+              body
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body
+            });
+          }
