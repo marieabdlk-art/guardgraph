@@ -51,16 +51,36 @@ GuardGraph distinguishes dangerous public mutations from legitimate unauthentica
 
 These should not require `AUTH_REQUIRED`. They should have validation and abuse/rate-limit protections.
 
-## Quick start
+## Configuration
 
-```bash
-python -m guardgraph.cli tests/test_app
+GuardGraph can be configured through `guardgraph.yml`:
+
+```yaml
+target:
+  path: "tests/test_app"
+  language: "python"
+  framework: "fastapi"
+
+report:
+  json: "guardgraph_report.json"
+  markdown: "guardgraph_report.md"
+
+github:
+  pr_comment: true
 ```
 
-Or write a report:
+## Quick start
+
+Run with the config file:
 
 ```bash
-python -m guardgraph.cli tests/test_app -o guardgraph_report.json
+python -m guardgraph --config guardgraph.yml
+```
+
+Or run directly against a target path:
+
+```bash
+python -m guardgraph tests/test_app -o guardgraph_report.json -m guardgraph_report.md
 ```
 
 ## Run tests
@@ -69,6 +89,10 @@ python -m guardgraph.cli tests/test_app -o guardgraph_report.json
 pip install -e .[dev]
 pytest
 ```
+
+## GitHub Actions
+
+The included workflow runs GuardGraph from `guardgraph.yml`, prints the Markdown report in logs, adds it to the Actions summary, uploads JSON/Markdown artifacts, and posts/updates a GuardGraph comment on pull requests.
 
 ## Why not just Semgrep / taint tracking?
 
