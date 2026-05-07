@@ -5,6 +5,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -28,6 +33,30 @@ jobs:
           cat guardgraph_report.md
       - name: Add GuardGraph summary
         run: cat guardgraph_report.md >> $GITHUB_STEP_SUMMARY
+      - name: Comment GuardGraph report on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          MARKER='<!-- guardgraph-report -->'
+          {
+            echo "$MARKER"
+            echo ""
+            cat guardgraph_report.md
+          } > guardgraph_pr_comment.md
+
+          COMMENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --jq '.[] | select(.body | contains("<!-- guardgraph-report -->")) | .id' \
+            | head -n 1)
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" \
+              -f body="$(cat guardgraph_pr_comment.md)"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+              -f body="$(cat guardgraph_pr_comment.md)"
+          fi
       - name: Upload GuardGraph reports
         uses: actions/upload-artifact@v4
         with:
