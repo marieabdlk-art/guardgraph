@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "guardgraph"
-version = "0.2.0"
+version = "0.2.1"
 description = "Structural AppSec risk detector for FastAPI applications"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "Mariam"}]
 license = {text = "Proprietary"}
-dependencies = []
+dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
