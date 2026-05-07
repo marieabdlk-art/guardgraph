@@ -85,6 +85,7 @@ def title_for_metric(metric: str) -> str:
         "RAW_INPUT_TO_SINK": "Raw Input to Sensitive Sink",
         "CRITICAL_ACTION_WEAK_ZONE": "Critical Action Without Guard",
         "PUBLIC_ACTION_UNVALIDATED": "Unvalidated Public Entry",
+        "UNRESTRICTED_UPLOAD_BOUNDARY": "Unsafe Upload Boundary",
     }.get(metric, metric.replace("_", " ").title())
 
 
@@ -95,6 +96,7 @@ def owasp_for_metric(metric: str) -> str:
         "RAW_INPUT_TO_SINK": "A03:2021-Injection",
         "CRITICAL_ACTION_WEAK_ZONE": "A01:2021-Broken Access Control",
         "PUBLIC_ACTION_UNVALIDATED": "A04:2021-Insecure Design",
+        "UNRESTRICTED_UPLOAD_BOUNDARY": "A01:2021-Broken Access Control",
     }.get(metric, "A04:2021-Insecure Design")
 
 
@@ -105,4 +107,5 @@ def cwe_for_metric(metric: str) -> list[str]:
         "RAW_INPUT_TO_SINK": ["CWE-89", "CWE-20"],
         "CRITICAL_ACTION_WEAK_ZONE": ["CWE-862", "CWE-732"],
         "PUBLIC_ACTION_UNVALIDATED": ["CWE-20", "CWE-770"],
+        "UNRESTRICTED_UPLOAD_BOUNDARY": ["CWE-434", "CWE-284"],
     }.get(metric, ["CWE-284"])
