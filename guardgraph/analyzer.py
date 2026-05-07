@@ -4,7 +4,7 @@ import ast
 from dataclasses import asdict
 from typing import Any
 
-from .models import Endpoint, Finding, ObservedGuard, Operation, title_for_metric
+from .models import Endpoint, Finding, ObservedGuard, Operation, cwe_for_metric, owasp_for_metric, title_for_metric
 from .parser import FastAPIEndpointExtractor
 from .utils import contains_keywords, get_call_name, has_fstring, is_resource_id_name, node_to_source
 
@@ -16,7 +16,7 @@ class GuardGraphAnalyzer:
     obligations, matches observed guards, and reports structural gaps.
     """
 
-    VERSION = "0.4.0"
+    VERSION = "0.4.1"
 
     def __init__(self, extractor: FastAPIEndpointExtractor):
         self.extractor = extractor
@@ -297,6 +297,8 @@ class GuardGraphAnalyzer:
             missing_obligations=missing,
             recommendation=self.recommendation(metric),
             title=title_for_metric(metric),
+            owasp_category=owasp_for_metric(metric),
+            cwe=cwe_for_metric(metric),
             evidence_strength=evidence_strength,
             review_required=True,
             exploit_confirmed=False,
