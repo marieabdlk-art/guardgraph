@@ -105,7 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run GuardGraph
-        uses: marieabdlk-art/guardgraph@main
+        uses: marieabdlk-art/guardgraph@v0.3.0
         with:
           config-path: guardgraph.yml
           pr-comment: "true"
@@ -116,7 +116,7 @@ Direct target mode is also supported:
 
 ```yaml
 - name: Run GuardGraph
-  uses: marieabdlk-art/guardgraph@main
+  uses: marieabdlk-art/guardgraph@v0.3.0
   with:
     target-path: app
     json-output: guardgraph_report.json
