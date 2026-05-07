@@ -1,0 +1,50 @@
+cases:
+  - id: CVE-2026-4505
+    status: candidate
+    project:
+      name: DB-GPT
+      repository: eosphoros-ai/DB-GPT
+      homepage: https://github.com/eosphoros-ai/DB-GPT
+    advisory:
+      cve: CVE-2026-4505
+      sources:
+        - https://nvd.nist.gov/vuln/detail/CVE-2026-4505
+        - https://vuldb.com/?id.307327
+    affected:
+      framework: fastapi
+      versions: "<=0.7.5"
+      file: packages/dbgpt-serve/src/dbgpt_serve/agent/hub/controller.py
+      symbol: module_plugin.refresh_plugins
+    vulnerability:
+      class: unrestricted_upload_improper_access_control
+      cwe:
+        - CWE-284
+        - CWE-434
+      owasp:
+        - A01:2021-Broken Access Control
+        - A04:2021-Insecure Design
+      summary: >-
+        Public reports describe an unrestricted upload / improper access-control
+        issue in a FastAPI endpoint related to plugin refresh/upload behavior.
+    expected_guardgraph:
+      metrics:
+        - CRITICAL_ACTION_WEAK_ZONE
+        - PUBLIC_ACTION_UNVALIDATED
+      obligations:
+        - AUTH_REQUIRED
+        - ROLE_OR_PERMISSION_REQUIRED
+        - VALIDATION_REQUIRED
+      expected_signal: >-
+        A plugin upload/refresh action should expose a sensitive state-changing
+        operation that requires authentication, permission/role boundaries, and
+        strict validation. GuardGraph should flag missing visible boundaries if
+        they are absent in the vulnerable snapshot.
+    reproduction:
+      vulnerable_ref: null
+      fixed_ref: null
+      scan_target: null
+      result: not_yet_reproduced
+    notes:
+      - Candidate case only. Do not claim detection until the vulnerable snapshot is checked out and scanned.
+      - Needs confirmation of exact vulnerable commit/tag and fixed commit/tag.
+      - If the vulnerability lives behind framework patterns GuardGraph cannot yet resolve, classify as partial or missed rather than detected.
