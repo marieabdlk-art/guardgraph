@@ -81,3 +81,7 @@ GuardGraph asks:
 > Given what this endpoint does, which security obligations must exist, and are they visible in the code path?
 
 That makes access-control and ownership gaps first-class findings rather than incidental patterns.
+
+## PR comment smoke test
+
+This line exists only to verify that GuardGraph can publish a Markdown report as a Pull Request comment.
