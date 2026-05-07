@@ -32,19 +32,21 @@ Current MVP focuses on **Python + FastAPI**.
 
 Detected structural gaps:
 
-| English title | Display label | Internal metric | Meaning |
-|---|---|---|---|
-| Unguarded State Change | Слепой переход | `PUBLIC_MUTATION` | State-changing endpoint without visible authentication |
-| Missing Ownership Boundary | Чужой паспорт | `MISSING_OWNERSHIP_BOUNDARY` | User-controlled resource ID without visible ownership check |
-| Raw Input to Sensitive Sink | Голый провод | `RAW_INPUT_TO_SINK` | Raw input reaches SQL/sensitive sink without safe handling |
-| Critical Action Without Guard | Кнопка без крышки | `CRITICAL_ACTION_WEAK_ZONE` | Payment/admin action exposed without strong permission boundary |
-| Unvalidated Public Entry | Открытая форма | `PUBLIC_ACTION_UNVALIDATED` | Legit public action without visible validation |
+| English title | Display label | Internal metric | OWASP / CWE | Meaning |
+|---|---|---|---|---|
+| Unguarded State Change | Слепой переход | `PUBLIC_MUTATION` | A01 / CWE-862, CWE-306 | State-changing endpoint without visible authentication |
+| Missing Ownership Boundary | Чужой паспорт | `MISSING_OWNERSHIP_BOUNDARY` | A01 / CWE-639, CWE-862 | User-controlled resource ID without visible ownership check |
+| Raw Input to Sensitive Sink | Голый провод | `RAW_INPUT_TO_SINK` | A03 / CWE-89, CWE-20 | Raw input reaches SQL/sensitive sink without safe handling |
+| Critical Action Without Guard | Кнопка без крышки | `CRITICAL_ACTION_WEAK_ZONE` | A01 / CWE-862, CWE-732 | Payment/admin action exposed without strong permission boundary |
+| Unvalidated Public Entry | Открытая форма | `PUBLIC_ACTION_UNVALIDATED` | A04 / CWE-20, CWE-770 | Legit public action without visible validation |
 
 Each finding includes:
 
 - `review_required: true`
 - `exploit_confirmed: false`
 - `evidence_strength: STRONG | PARTIAL`
+- `owasp_category`
+- `cwe`
 
 ## Legitimate public actions
 
@@ -111,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run GuardGraph
-        uses: marieabdlk-art/guardgraph@v0.4.0
+        uses: marieabdlk-art/guardgraph@v0.4.1
         with:
           config-path: guardgraph.yml
           pr-comment: "true"
@@ -123,13 +125,50 @@ Direct target mode is also supported:
 
 ```yaml
 - name: Run GuardGraph
-  uses: marieabdlk-art/guardgraph@v0.4.0
+  uses: marieabdlk-art/guardgraph@v0.4.1
   with:
     target-path: app
     json-output: guardgraph_report.json
     markdown-output: guardgraph_report.md
     sarif-output: guardgraph_report.sarif
     pr-comment: "true"
+```
+
+## GitHub Code Scanning example
+
+GuardGraph can generate SARIF and upload it to GitHub Code Scanning:
+
+```yaml
+name: GuardGraph Code Scanning
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  guardgraph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run GuardGraph
+        uses: marieabdlk-art/guardgraph@v0.4.1
+        with:
+          config-path: guardgraph.yml
+          pr-comment: "true"
+          upload-artifacts: "true"
+          sarif-output: guardgraph_report.sarif
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: guardgraph_report.sarif
 ```
 
 ## SARIF output
@@ -140,7 +179,7 @@ GuardGraph can emit SARIF 2.1.0:
 python -m guardgraph --config guardgraph.yml --sarif guardgraph_report.sarif
 ```
 
-SARIF results preserve GuardGraph metadata such as risk level, confidence, evidence strength, review requirement, and the fact that exploitability is not confirmed.
+SARIF results preserve GuardGraph metadata such as risk level, confidence, evidence strength, OWASP category, CWE IDs, review requirement, and the fact that exploitability is not confirmed.
 
 ## Run tests
 
