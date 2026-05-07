@@ -53,6 +53,8 @@ class Finding:
     missing_obligations: list[str]
     recommendation: str
     title: str = ""
+    owasp_category: str = ""
+    cwe: list[str] = field(default_factory=list)
     evidence_strength: str = "PARTIAL"
     review_required: bool = True
     exploit_confirmed: bool = False
@@ -61,6 +63,10 @@ class Finding:
         data = asdict(self)
         if not data.get("title"):
             data["title"] = title_for_metric(self.metric)
+        if not data.get("owasp_category"):
+            data["owasp_category"] = owasp_for_metric(self.metric)
+        if not data.get("cwe"):
+            data["cwe"] = cwe_for_metric(self.metric)
         return data
 
 
@@ -80,3 +86,23 @@ def title_for_metric(metric: str) -> str:
         "CRITICAL_ACTION_WEAK_ZONE": "Critical Action Without Guard",
         "PUBLIC_ACTION_UNVALIDATED": "Unvalidated Public Entry",
     }.get(metric, metric.replace("_", " ").title())
+
+
+def owasp_for_metric(metric: str) -> str:
+    return {
+        "PUBLIC_MUTATION": "A01:2021-Broken Access Control",
+        "MISSING_OWNERSHIP_BOUNDARY": "A01:2021-Broken Access Control",
+        "RAW_INPUT_TO_SINK": "A03:2021-Injection",
+        "CRITICAL_ACTION_WEAK_ZONE": "A01:2021-Broken Access Control",
+        "PUBLIC_ACTION_UNVALIDATED": "A04:2021-Insecure Design",
+    }.get(metric, "A04:2021-Insecure Design")
+
+
+def cwe_for_metric(metric: str) -> list[str]:
+    return {
+        "PUBLIC_MUTATION": ["CWE-862", "CWE-306"],
+        "MISSING_OWNERSHIP_BOUNDARY": ["CWE-639", "CWE-862"],
+        "RAW_INPUT_TO_SINK": ["CWE-89", "CWE-20"],
+        "CRITICAL_ACTION_WEAK_ZONE": ["CWE-862", "CWE-732"],
+        "PUBLIC_ACTION_UNVALIDATED": ["CWE-20", "CWE-770"],
+    }.get(metric, ["CWE-284"])
