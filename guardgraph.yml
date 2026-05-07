@@ -1,0 +1,11 @@
+target:
+  path: "tests/test_app"
+  language: "python"
+  framework: "fastapi"
+
+report:
+  json: "guardgraph_report.json"
+  markdown: "guardgraph_report.md"
+
+github:
+  pr_comment: true
