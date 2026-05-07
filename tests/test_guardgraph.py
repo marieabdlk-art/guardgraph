@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from guardgraph.cli import analyze_path
+from guardgraph.cli import analyze_path, run_with_config
+from guardgraph.config import load_config
 
 ROOT = Path(__file__).parent / "test_app"
 
@@ -38,3 +39,31 @@ def test_report_shape():
     assert report["meta"]["tool"] == "guardgraph"
     assert report["meta"]["statistics"]["endpoints_found"] >= 10
     assert isinstance(report["findings"], list)
+
+
+def test_config_mode_writes_json_and_markdown(tmp_path):
+    cfg_path = tmp_path / "guardgraph.yml"
+    json_path = tmp_path / "out.json"
+    md_path = tmp_path / "out.md"
+    cfg_path.write_text(
+        f"""
+        target:
+          path: "{ROOT}"
+          language: "python"
+          framework: "fastapi"
+        report:
+          json: "{json_path}"
+          markdown: "{md_path}"
+        github:
+          pr_comment: true
+        """,
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_path)
+    report = run_with_config(cfg)
+
+    assert report["meta"]["statistics"]["endpoints_found"] >= 10
+    assert json_path.exists()
+    assert md_path.exists()
+    assert "# GuardGraph Report" in md_path.read_text(encoding="utf-8")
