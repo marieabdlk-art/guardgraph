@@ -31,8 +31,8 @@ def _write_reports(report: dict, *, json_path: str | None, markdown_path: str | 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="GuardGraph structural AppSec risk detector")
-    parser.add_argument("target", nargs="?", help="Path to a FastAPI project. Ignored when --config is used unless --target is also provided.")
-    parser.add_argument("--target", help="Override target path from config")
+    parser.add_argument("target", nargs="?", help="Path to a FastAPI project")
+    parser.add_argument("--target", dest="target_override", help="Override target path from config")
     parser.add_argument("--config", "-c", help="Path to guardgraph.yml")
     parser.add_argument("--output", "-o", help="Write JSON report to this path")
     parser.add_argument("--markdown", "-m", help="Write human-readable Markdown report to this path")
@@ -40,12 +40,12 @@ def main() -> None:
 
     if args.config:
         cfg = load_config(args.config)
-        target_path = args.target or args.target or cfg.target.path
+        target_path = args.target_override or args.target or cfg.target.path
         json_out = args.output if args.output is not None else cfg.report.json
         md_out = args.markdown if args.markdown is not None else cfg.report.markdown
     else:
         cfg = default_config()
-        target_path = args.target or args.target or args.target or cfg.target.path
+        target_path = args.target_override or args.target or cfg.target.path
         json_out = args.output
         md_out = args.markdown
 
