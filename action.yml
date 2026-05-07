@@ -18,6 +18,10 @@ inputs:
     description: "Markdown report output path"
     required: false
     default: "guardgraph_report.md"
+  sarif-output:
+    description: "SARIF report output path"
+    required: false
+    default: "guardgraph_report.sarif"
   python-version:
     description: "Python version"
     required: false
@@ -27,7 +31,7 @@ inputs:
     required: false
     default: "false"
   upload-artifacts:
-    description: "Upload JSON/Markdown reports as workflow artifacts"
+    description: "Upload JSON/Markdown/SARIF reports as workflow artifacts"
     required: false
     default: "true"
 
@@ -38,6 +42,9 @@ outputs:
   markdown-report:
     description: "Path to Markdown report"
     value: ${{ inputs.markdown-output }}
+  sarif-report:
+    description: "Path to SARIF report"
+    value: ${{ inputs.sarif-output }}
 
 runs:
   using: "composite"
@@ -62,10 +69,12 @@ runs:
           echo "Running GuardGraph in direct target mode..."
           python -m guardgraph "${{ inputs.target-path }}" \
             -o "${{ inputs.json-output }}" \
-            -m "${{ inputs.markdown-output }}"
+            -m "${{ inputs.markdown-output }}" \
+            --sarif "${{ inputs.sarif-output }}"
         else
           echo "Running GuardGraph in config mode..."
-          python -m guardgraph --config "${{ inputs.config-path }}"
+          python -m guardgraph --config "${{ inputs.config-path }}" \
+            --sarif "${{ inputs.sarif-output }}"
         fi
 
     - name: Print Markdown report to logs
@@ -95,6 +104,7 @@ runs:
         path: |
           ${{ inputs.json-output }}
           ${{ inputs.markdown-output }}
+          ${{ inputs.sarif-output }}
         if-no-files-found: warn
 
     - name: Post or update PR comment
