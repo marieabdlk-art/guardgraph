@@ -146,3 +146,7 @@ GuardGraph asks:
 > Given what this endpoint does, which security obligations must exist, and are they visible in the code path?
 
 That makes access-control and ownership gaps first-class findings rather than incidental patterns.
+
+## Reusable action smoke test
+
+This line exists only to verify the local reusable action workflow path.
