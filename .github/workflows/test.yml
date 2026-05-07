@@ -1,0 +1,25 @@
+name: GuardGraph tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: pip install -e .[dev]
+      - name: Run tests
+        run: pytest -q
+      - name: Run GuardGraph demo
+        run: python -m guardgraph.cli tests/test_app -o guardgraph_report.json
+      - name: Upload GuardGraph report
+        uses: actions/upload-artifact@v4
+        with:
+          name: guardgraph-report
+          path: guardgraph_report.json
