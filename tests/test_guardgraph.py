@@ -5,6 +5,7 @@ from guardgraph.cli import analyze_path, run_with_config, _write_reports
 from guardgraph.config import load_config
 
 ROOT = Path(__file__).parent / "test_app"
+FIXTURES = Path(__file__).resolve().parents[1] / "benchmarks" / "fixtures"
 
 
 def metrics(report):
@@ -18,6 +19,21 @@ def test_guardgraph_detects_core_structural_gaps():
     assert "PUBLIC_MUTATION" in found
     assert "MISSING_OWNERSHIP_BOUNDARY" in found
     assert "RAW_INPUT_TO_SINK" in found
+
+
+def test_guardgraph_detects_unsafe_upload_boundary_fixture():
+    report = analyze_path(FIXTURES)
+    found = metrics(report)
+    assert "UNRESTRICTED_UPLOAD_BOUNDARY" in found
+
+    finding = next(f for f in report["findings"] if f["metric"] == "UNRESTRICTED_UPLOAD_BOUNDARY")
+    assert finding["title"] == "Unsafe Upload Boundary"
+    assert finding["owasp_category"] == "A01:2021-Broken Access Control"
+    assert "CWE-434" in finding["cwe"]
+    assert "CWE-284" in finding["cwe"]
+    assert "AUTH_REQUIRED" in finding["missing_obligations"]
+    assert "ROLE_OR_PERMISSION_REQUIRED" in finding["missing_obligations"]
+    assert "UPLOAD_VALIDATION_REQUIRED" in finding["missing_obligations"]
 
 
 def test_registration_login_contact_are_not_reported_as_critical_auth_gaps():
@@ -38,7 +54,7 @@ def test_safe_update_order_is_not_flagged():
 def test_report_shape():
     report = analyze_path(ROOT)
     assert report["meta"]["tool"] == "guardgraph"
-    assert report["meta"]["version"] == "0.4.1"
+    assert report["meta"]["version"] == "0.4.2"
     assert report["meta"]["statistics"]["endpoints_found"] >= 10
     assert isinstance(report["findings"], list)
     first = report["findings"][0]
