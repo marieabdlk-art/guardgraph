@@ -16,7 +16,7 @@ class GuardGraphAnalyzer:
     obligations, matches observed guards, and reports structural gaps.
     """
 
-    VERSION = "0.2.1"
+    VERSION = "0.3.0"
 
     def __init__(self, extractor: FastAPIEndpointExtractor):
         self.extractor = extractor
