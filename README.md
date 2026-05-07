@@ -83,6 +83,47 @@ Or run directly against a target path:
 python -m guardgraph tests/test_app -o guardgraph_report.json -m guardgraph_report.md
 ```
 
+## Reusable GitHub Action
+
+GuardGraph can be used as a reusable GitHub Action from another repository:
+
+```yaml
+name: GuardGraph
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  guardgraph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run GuardGraph
+        uses: marieabdlk-art/guardgraph@main
+        with:
+          config-path: guardgraph.yml
+          pr-comment: "true"
+          upload-artifacts: "true"
+```
+
+Direct target mode is also supported:
+
+```yaml
+- name: Run GuardGraph
+  uses: marieabdlk-art/guardgraph@main
+  with:
+    target-path: app
+    json-output: guardgraph_report.json
+    markdown-output: guardgraph_report.md
+    pr-comment: "true"
+```
+
 ## Run tests
 
 ```bash
@@ -92,7 +133,7 @@ pytest
 
 ## GitHub Actions
 
-The included workflow runs GuardGraph from `guardgraph.yml`, prints the Markdown report in logs, adds it to the Actions summary, uploads JSON/Markdown artifacts, and posts/updates a GuardGraph comment on pull requests.
+The included workflow uses the local action (`uses: ./`) to run GuardGraph from `guardgraph.yml`, print the Markdown report in logs, add it to the Actions summary, upload JSON/Markdown artifacts, and post/update a GuardGraph comment on pull requests.
 
 ## Why not just Semgrep / taint tracking?
 
