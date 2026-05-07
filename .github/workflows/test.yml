@@ -18,49 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install
-        run: pip install -e .[dev]
       - name: Run tests
-        run: pytest -q
-      - name: Run GuardGraph demo from config
-        run: python -m guardgraph --config guardgraph.yml
-      - name: Print GuardGraph Markdown report in logs
-        run: |
-          echo "===== GUARDGRAPH MARKDOWN REPORT ====="
-          cat guardgraph_report.md
-      - name: Add GuardGraph summary
-        run: cat guardgraph_report.md >> $GITHUB_STEP_SUMMARY
-      - name: Comment GuardGraph report on PR
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          MARKER='<!-- guardgraph-report -->'
-          {
-            echo "$MARKER"
-            echo ""
-            cat guardgraph_report.md
-          } > guardgraph_pr_comment.md
-
-          COMMENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-            --jq '.[] | select(.body | contains("<!-- guardgraph-report -->")) | .id' \
-            | head -n 1)
-
-          if [ -n "$COMMENT_ID" ]; then
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" \
-              -f body="$(cat guardgraph_pr_comment.md)"
-          else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-              -f body="$(cat guardgraph_pr_comment.md)"
-          fi
-      - name: Upload GuardGraph reports
-        uses: actions/upload-artifact@v4
+        uses: ./
         with:
-          name: guardgraph-report
-          path: |
-            guardgraph_report.json
-            guardgraph_report.md
+          config-path: guardgraph.yml
+          pr-comment: "true"
+          upload-artifacts: "true"
