@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guardgraph"
+version = "0.2.0"
+description = "Structural AppSec risk detector for FastAPI applications"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Mariam"}]
+license = {text = "Proprietary"}
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+guardgraph = "guardgraph.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
