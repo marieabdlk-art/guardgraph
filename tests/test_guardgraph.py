@@ -1,6 +1,7 @@
+import json
 from pathlib import Path
 
-from guardgraph.cli import analyze_path, run_with_config
+from guardgraph.cli import analyze_path, run_with_config, _write_reports
 from guardgraph.config import load_config
 
 ROOT = Path(__file__).parent / "test_app"
@@ -37,8 +38,14 @@ def test_safe_update_order_is_not_flagged():
 def test_report_shape():
     report = analyze_path(ROOT)
     assert report["meta"]["tool"] == "guardgraph"
+    assert report["meta"]["version"] == "0.4.0"
     assert report["meta"]["statistics"]["endpoints_found"] >= 10
     assert isinstance(report["findings"], list)
+    first = report["findings"][0]
+    assert "title" in first
+    assert first["review_required"] is True
+    assert first["exploit_confirmed"] is False
+    assert first["evidence_strength"] in {"STRONG", "PARTIAL"}
 
 
 def test_config_mode_writes_json_and_markdown(tmp_path):
@@ -67,3 +74,16 @@ def test_config_mode_writes_json_and_markdown(tmp_path):
     assert json_path.exists()
     assert md_path.exists()
     assert "# GuardGraph Report" in md_path.read_text(encoding="utf-8")
+
+
+def test_sarif_output(tmp_path):
+    report = analyze_path(ROOT)
+    sarif_path = tmp_path / "guardgraph.sarif"
+    _write_reports(report, json_path=None, markdown_path=None, sarif_path=str(sarif_path))
+
+    sarif = json.loads(sarif_path.read_text(encoding="utf-8"))
+    assert sarif["version"] == "2.1.0"
+    run = sarif["runs"][0]
+    assert run["tool"]["driver"]["name"] == "GuardGraph"
+    assert run["results"]
+    assert run["results"][0]["properties"]["review_required"] is True
