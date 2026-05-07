@@ -16,7 +16,7 @@ class GuardGraphAnalyzer:
     obligations, matches observed guards, and reports structural gaps.
     """
 
-    VERSION = "0.2.0"
+    VERSION = "0.2.1"
 
     def __init__(self, extractor: FastAPIEndpointExtractor):
         self.extractor = extractor
@@ -74,6 +74,10 @@ class GuardGraphAnalyzer:
             params.append({"name": arg.arg, "annotation": annotation, "default": default_src})
         return params
 
+    def _decorator_call_ids(self, fn: ast.AST) -> set[int]:
+        """Return AST ids for decorator calls so they are not treated as runtime operations."""
+        return {id(node) for dec in getattr(fn, "decorator_list", []) for node in ast.walk(dec)}
+
     def detect_guards(self, fn: ast.AST, ep: Endpoint) -> list[ObservedGuard]:
         guards: list[ObservedGuard] = []
 
@@ -82,7 +86,10 @@ class GuardGraphAnalyzer:
             if contains_keywords(text, ["depends", "get_current_user", "current_user", "auth", "jwt", "token"]):
                 guards.append(ObservedGuard("AUTH_CHECK", ep.file, ep.line, text, "HIGH"))
 
+        decorator_ids = self._decorator_call_ids(fn)
         for node in ast.walk(fn):
+            if id(node) in decorator_ids:
+                continue
             src = node_to_source(node)
             low = src.lower()
             if isinstance(node, ast.Call):
@@ -110,8 +117,9 @@ class GuardGraphAnalyzer:
 
     def detect_operations(self, fn: ast.AST, ep: Endpoint) -> list[Operation]:
         ops: list[Operation] = []
+        decorator_ids = self._decorator_call_ids(fn)
         for node in ast.walk(fn):
-            if not isinstance(node, ast.Call):
+            if not isinstance(node, ast.Call) or id(node) in decorator_ids:
                 continue
             name = get_call_name(node)
             low = name.lower()
@@ -132,8 +140,9 @@ class GuardGraphAnalyzer:
 
     def detect_sinks(self, fn: ast.AST, ep: Endpoint) -> list[Operation]:
         sinks: list[Operation] = []
+        decorator_ids = self._decorator_call_ids(fn)
         for node in ast.walk(fn):
-            if not isinstance(node, ast.Call):
+            if not isinstance(node, ast.Call) or id(node) in decorator_ids:
                 continue
             name = get_call_name(node)
             low = name.lower()
@@ -149,7 +158,10 @@ class GuardGraphAnalyzer:
 
     def detect_raw_inputs(self, fn: ast.AST, ep: Endpoint) -> list[dict[str, Any]]:
         raw: list[dict[str, Any]] = []
+        decorator_ids = self._decorator_call_ids(fn)
         for node in ast.walk(fn):
+            if id(node) in decorator_ids:
+                continue
             src = node_to_source(node)
             if contains_keywords(src, ["request.json", "request.body", "request.query", "request.headers", "request.form"]):
                 raw.append({"file": ep.file, "line": getattr(node, "lineno", ep.line), "evidence": src})
@@ -169,6 +181,8 @@ class GuardGraphAnalyzer:
             return "PASSWORD_RESET_ACTION"
         if any(k in text for k in ["contact", "feedback", "lead"]):
             return "PUBLIC_CONTACT_ACTION"
+        if any(k in text for k in ["search", "query", "lookup", "find"]):
+            return "SEARCH_ACTION"
 
         if "PAYMENT_OP" in op_types or any(k in path_low for k in ["pay", "payment", "refund", "charge"]):
             return "PAYMENT_ACTION"
@@ -191,6 +205,12 @@ class GuardGraphAnalyzer:
             obligations.append("ABUSE_PROTECTION_RECOMMENDED")
             if action in {"AUTH_SESSION_ACTION", "PASSWORD_RESET_ACTION"}:
                 obligations.append("RATE_LIMIT_RECOMMENDED")
+            return obligations
+
+        if action == "SEARCH_ACTION":
+            obligations.append("VALIDATION_REQUIRED")
+            if any(s.type == "RAW_SQL" and s.danger >= 0.8 for s in facts["sinks"]):
+                obligations.append("SAFE_SINK_REQUIRED")
             return obligations
 
         if action in {"USER_RESOURCE_READ", "USER_RESOURCE_MUTATION", "DESTRUCTIVE_ACTION", "PAYMENT_ACTION", "ADMIN_ACTION", "STATE_MUTATION"}:
@@ -219,7 +239,7 @@ class GuardGraphAnalyzer:
             gaps.append("ROLE_OR_PERMISSION_REQUIRED")
         if "ROLE_OR_OWNERSHIP_REQUIRED" in obligations and not (facts["role"] or facts["ownership"]):
             gaps.append("ROLE_OR_OWNERSHIP_REQUIRED")
-        if "SAFE_SINK_REQUIRED" in obligations and any(s.type == "RAW_SQL" and s.danger >= 0.8 for s in facts["sinks"]) and not facts["validators"]:
+        if "SAFE_SINK_REQUIRED" in obligations and any(s.type == "RAW_SQL" and s.danger >= 0.8 for s in facts["sinks"]):
             gaps.append("SAFE_SINK_REQUIRED")
         return gaps
 
@@ -229,7 +249,7 @@ class GuardGraphAnalyzer:
 
         if (
             ep.action_class not in legit_public_actions
-            and ep.action_class not in {"PAYMENT_ACTION", "ADMIN_ACTION"}
+            and ep.action_class not in {"PAYMENT_ACTION", "ADMIN_ACTION", "SEARCH_ACTION"}
             and "AUTH_REQUIRED" in gaps
             and any(op.type in {"WRITE_OP", "DELETE_OP", "PAYMENT_OP"} for op in facts["operations"])
         ):
@@ -281,8 +301,9 @@ class GuardGraphAnalyzer:
         flow = [f"{ep.method} {ep.full_path}", ep.handler]
         if facts["user_controlled_ids"]:
             flow.extend(p["name"] for p in facts["user_controlled_ids"])
-        if facts["operations"]:
-            flow.append(facts["operations"][0].name)
+        runtime_ops = [op for op in facts["operations"] if not op.name.startswith("router.")]
+        if runtime_ops:
+            flow.append(runtime_ops[0].name)
         elif facts["sinks"]:
             flow.append(facts["sinks"][0].name)
         return flow
