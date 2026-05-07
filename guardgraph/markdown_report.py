@@ -91,6 +91,8 @@ def render_markdown_report(report: dict[str, Any]) -> str:
             lines.append(f"`{method} {path}` in `{file_path}:{line}`")
             lines.append("")
             lines.append(f"- **Metric:** `{f.get('metric', 'unknown')}`")
+            lines.append(f"- **OWASP:** `{f.get('owasp_category', 'unknown')}`")
+            lines.append(f"- **CWE:** `{', '.join(f.get('cwe', [])) or 'unknown'}`")
             lines.append(f"- **Action class:** `{f.get('action_class', 'unknown')}`")
             lines.append(f"- **Confidence:** `{f.get('confidence', 'unknown')}`")
             lines.append(f"- **Evidence strength:** `{f.get('evidence_strength', 'PARTIAL')}`")
