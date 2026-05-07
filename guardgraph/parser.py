@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import Endpoint
-from .utils import HTTP_METHODS, literal_string, walk_functions
+from .utils import HTTP_METHODS, literal_string, node_to_source, walk_functions
 
 
 class FastAPIEndpointExtractor:
@@ -13,7 +13,9 @@ class FastAPIEndpointExtractor:
 
     Scope:
     - APIRouter(prefix=...)
+    - router-level dependencies=[Depends(...)]
     - @router.get/post/put/delete/patch("/path")
+    - route-level dependencies=[Depends(...)]
     - Pydantic BaseModel classes
     """
 
@@ -23,6 +25,8 @@ class FastAPIEndpointExtractor:
         self.trees: list[tuple[Path, ast.AST]] = []
         self.func_index: dict[tuple[str, str], ast.AST] = {}
         self.router_prefix_by_file: dict[str, str] = {}
+        self.router_dependencies_by_file: dict[str, list[str]] = {}
+        self.route_dependencies_by_endpoint: dict[tuple[str, str], list[str]] = {}
         self.pydantic_models: set[str] = set()
 
     def parse(self) -> "FastAPIEndpointExtractor":
@@ -33,6 +37,7 @@ class FastAPIEndpointExtractor:
                 continue
             self.trees.append((py_file, tree))
             self.router_prefix_by_file[str(py_file)] = self._extract_router_prefix(tree)
+            self.router_dependencies_by_file[str(py_file)] = self._extract_router_dependencies(tree)
             self.pydantic_models |= self._extract_pydantic_models(tree)
             for fn in walk_functions(tree):
                 self.func_index[(str(py_file), fn.name)] = fn
@@ -47,6 +52,26 @@ class FastAPIEndpointExtractor:
                         if kw.arg == "prefix":
                             return literal_string(kw.value) or ""
         return ""
+
+    def _extract_router_dependencies(self, tree: ast.AST) -> list[str]:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                call = node.value
+                if isinstance(call.func, ast.Name) and call.func.id == "APIRouter":
+                    return self._extract_dependencies_keyword(call)
+        return []
+
+    def _extract_dependencies_keyword(self, call: ast.Call) -> list[str]:
+        dependencies: list[str] = []
+        for kw in call.keywords:
+            if kw.arg != "dependencies":
+                continue
+            value = kw.value
+            if isinstance(value, (ast.List, ast.Tuple)):
+                dependencies.extend(node_to_source(elt) for elt in value.elts)
+            else:
+                dependencies.append(node_to_source(value))
+        return [dep for dep in dependencies if dep]
 
     def _extract_pydantic_models(self, tree: ast.AST) -> set[str]:
         models: set[str] = set()
@@ -68,9 +93,10 @@ class FastAPIEndpointExtractor:
                 route = self._extract_route_from_function(fn)
                 if not route:
                     continue
-                method, path = route
+                method, path, route_deps = route
                 self.endpoint_counter += 1
                 full_path = self._join_paths(prefix, path)
+                self.route_dependencies_by_endpoint[(str(file_path), fn.name)] = route_deps
                 endpoints.append(
                     Endpoint(
                         id=f"EP-{self.endpoint_counter:03d}",
@@ -85,7 +111,7 @@ class FastAPIEndpointExtractor:
                 )
         return endpoints
 
-    def _extract_route_from_function(self, fn: ast.AST) -> Optional[tuple[str, str]]:
+    def _extract_route_from_function(self, fn: ast.AST) -> Optional[tuple[str, str, list[str]]]:
         for decorator in getattr(fn, "decorator_list", []):
             if not isinstance(decorator, ast.Call):
                 continue
@@ -101,7 +127,7 @@ class FastAPIEndpointExtractor:
             for kw in decorator.keywords:
                 if kw.arg == "path":
                     path = literal_string(kw.value) or path
-            return method, path
+            return method, path, self._extract_dependencies_keyword(decorator)
         return None
 
     @staticmethod
