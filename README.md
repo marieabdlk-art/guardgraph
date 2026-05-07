@@ -1,6 +1,6 @@
 # GuardGraph
 
-**GuardGraph** is a structural AppSec risk detector for web applications and APIs.
+**GuardGraph** is a structural AppSec review action for FastAPI applications.
 
 Traditional scanners usually search for known dangerous patterns: unsafe functions, vulnerable dependencies, suspicious calls, or source-to-sink flows.
 
@@ -32,13 +32,19 @@ Current MVP focuses on **Python + FastAPI**.
 
 Detected structural gaps:
 
-| Public name | Internal metric | Meaning |
-|---|---|---|
-| Слепой переход | `PUBLIC_MUTATION` | State-changing endpoint without visible authentication |
-| Чужой паспорт | `MISSING_OWNERSHIP_BOUNDARY` | User-controlled resource ID without visible ownership check |
-| Голый провод | `RAW_INPUT_TO_SINK` | Raw input reaches SQL/sensitive sink without safe handling |
-| Кнопка без крышки | `CRITICAL_ACTION_WEAK_ZONE` | Payment/admin action exposed without strong permission boundary |
-| Открытая форма | `PUBLIC_ACTION_UNVALIDATED` | Legit public action without visible validation |
+| English title | Display label | Internal metric | Meaning |
+|---|---|---|---|
+| Unguarded State Change | Слепой переход | `PUBLIC_MUTATION` | State-changing endpoint without visible authentication |
+| Missing Ownership Boundary | Чужой паспорт | `MISSING_OWNERSHIP_BOUNDARY` | User-controlled resource ID without visible ownership check |
+| Raw Input to Sensitive Sink | Голый провод | `RAW_INPUT_TO_SINK` | Raw input reaches SQL/sensitive sink without safe handling |
+| Critical Action Without Guard | Кнопка без крышки | `CRITICAL_ACTION_WEAK_ZONE` | Payment/admin action exposed without strong permission boundary |
+| Unvalidated Public Entry | Открытая форма | `PUBLIC_ACTION_UNVALIDATED` | Legit public action without visible validation |
+
+Each finding includes:
+
+- `review_required: true`
+- `exploit_confirmed: false`
+- `evidence_strength: STRONG | PARTIAL`
 
 ## Legitimate public actions
 
@@ -74,13 +80,13 @@ github:
 Run with the config file:
 
 ```bash
-python -m guardgraph --config guardgraph.yml
+python -m guardgraph --config guardgraph.yml --sarif guardgraph_report.sarif
 ```
 
 Or run directly against a target path:
 
 ```bash
-python -m guardgraph tests/test_app -o guardgraph_report.json -m guardgraph_report.md
+python -m guardgraph tests/test_app -o guardgraph_report.json -m guardgraph_report.md --sarif guardgraph_report.sarif
 ```
 
 ## Reusable GitHub Action
@@ -105,24 +111,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run GuardGraph
-        uses: marieabdlk-art/guardgraph@v0.3.0
+        uses: marieabdlk-art/guardgraph@v0.4.0
         with:
           config-path: guardgraph.yml
           pr-comment: "true"
           upload-artifacts: "true"
+          sarif-output: guardgraph_report.sarif
 ```
 
 Direct target mode is also supported:
 
 ```yaml
 - name: Run GuardGraph
-  uses: marieabdlk-art/guardgraph@v0.3.0
+  uses: marieabdlk-art/guardgraph@v0.4.0
   with:
     target-path: app
     json-output: guardgraph_report.json
     markdown-output: guardgraph_report.md
+    sarif-output: guardgraph_report.sarif
     pr-comment: "true"
 ```
+
+## SARIF output
+
+GuardGraph can emit SARIF 2.1.0:
+
+```bash
+python -m guardgraph --config guardgraph.yml --sarif guardgraph_report.sarif
+```
+
+SARIF results preserve GuardGraph metadata such as risk level, confidence, evidence strength, review requirement, and the fact that exploitability is not confirmed.
 
 ## Run tests
 
@@ -133,7 +151,7 @@ pytest
 
 ## GitHub Actions
 
-The included workflow uses the local action (`uses: ./`) to run GuardGraph from `guardgraph.yml`, print the Markdown report in logs, add it to the Actions summary, upload JSON/Markdown artifacts, and post/update a GuardGraph comment on pull requests.
+The included workflow uses the local action (`uses: ./`) to run GuardGraph from `guardgraph.yml`, print the Markdown report in logs, add it to the Actions summary, upload JSON/Markdown/SARIF artifacts, and post/update a GuardGraph comment on pull requests.
 
 ## Why not just Semgrep / taint tracking?
 
