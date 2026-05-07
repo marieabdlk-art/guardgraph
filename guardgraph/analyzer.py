@@ -81,13 +81,28 @@ class GuardGraphAnalyzer:
         """Return AST ids for decorator calls so they are not treated as runtime operations."""
         return {id(node) for dec in getattr(fn, "decorator_list", []) for node in ast.walk(dec)}
 
+    def _add_dependency_guard(self, guards: list[ObservedGuard], ep: Endpoint, evidence: str, source: str) -> None:
+        low = evidence.lower()
+        if "depends" not in low:
+            return
+        if any(k in low for k in ["admin", "permission", "role", "superuser"]):
+            guards.append(ObservedGuard("AUTH_CHECK", ep.file, ep.line, f"{source}: {evidence}", "HIGH"))
+            guards.append(ObservedGuard("ADMIN_GATE", ep.file, ep.line, f"{source}: {evidence}", "HIGH"))
+            return
+        if any(k in low for k in ["get_current_user", "current_user", "auth", "jwt", "token", "user"]):
+            guards.append(ObservedGuard("AUTH_CHECK", ep.file, ep.line, f"{source}: {evidence}", "HIGH"))
+
     def detect_guards(self, fn: ast.AST, ep: Endpoint) -> list[ObservedGuard]:
         guards: list[ObservedGuard] = []
 
+        for dep in self.extractor.router_dependencies_by_file.get(ep.file, []):
+            self._add_dependency_guard(guards, ep, dep, "router_dependency")
+        for dep in self.extractor.route_dependencies_by_endpoint.get((ep.file, ep.handler), []):
+            self._add_dependency_guard(guards, ep, dep, "route_dependency")
+
         for param in self.extract_params(fn):
             text = f"{param.get('default') or ''} {param['name']} {param.get('annotation') or ''}"
-            if contains_keywords(text, ["depends", "get_current_user", "current_user", "auth", "jwt", "token"]):
-                guards.append(ObservedGuard("AUTH_CHECK", ep.file, ep.line, text, "HIGH"))
+            self._add_dependency_guard(guards, ep, text, "param_dependency")
 
         decorator_ids = self._decorator_call_ids(fn)
         for node in ast.walk(fn):
@@ -123,6 +138,8 @@ class GuardGraphAnalyzer:
 
     def detect_operations(self, fn: ast.AST, ep: Endpoint) -> list[Operation]:
         ops: list[Operation] = []
+        if ep.method == "DELETE":
+            ops.append(Operation("DELETE_OP", "http.delete", ep.file, ep.line, f"{ep.method} {ep.full_path}", 1.0))
         decorator_ids = self._decorator_call_ids(fn)
         for node in ast.walk(fn):
             if not isinstance(node, ast.Call) or id(node) in decorator_ids:
@@ -293,7 +310,7 @@ class GuardGraphAnalyzer:
             ep.action_class not in legit_public_actions
             and ep.action_class not in {"PAYMENT_ACTION", "ADMIN_ACTION", "SEARCH_ACTION", "UPLOAD_ACTION"}
             and "AUTH_REQUIRED" in gaps
-            and any(op.type in {"WRITE_OP", "DELETE_OP", "PAYMENT_OP"} for op in facts["operations"])
+            and (ep.method == "DELETE" or any(op.type in {"WRITE_OP", "DELETE_OP", "PAYMENT_OP"} for op in facts["operations"]))
         ):
             out.append(self.make_finding(ep, facts, "PUBLIC_MUTATION", "Слепой переход", "CRITICAL", 0.90, "Endpoint performs a state-changing operation without a visible authentication boundary.", ["AUTH_REQUIRED"]))
 
