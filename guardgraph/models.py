@@ -41,9 +41,13 @@ class Finding:
     id: str
     metric: str
     name: str
+    title: str
     risk_level: str
     risk_score: float
     confidence: str
+    evidence_strength: str
+    review_required: bool
+    exploit_confirmed: bool
     endpoint_id: str
     endpoint: dict[str, Any]
     action_class: str
