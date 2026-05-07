@@ -105,3 +105,7 @@ GuardGraph asks:
 > Given what this endpoint does, which security obligations must exist, and are they visible in the code path?
 
 That makes access-control and ownership gaps first-class findings rather than incidental patterns.
+
+## Config-mode smoke test
+
+This line exists only to verify the config-driven workflow path.
