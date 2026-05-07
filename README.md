@@ -203,3 +203,7 @@ GuardGraph asks:
 > Given what this endpoint does, which security obligations must exist, and are they visible in the code path?
 
 That makes access-control and ownership gaps first-class findings rather than incidental patterns.
+
+## v0.4.1 smoke test
+
+This line exists only to verify OWASP/CWE metadata and Code Scanning documentation.
