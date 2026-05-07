@@ -8,6 +8,7 @@ from .analyzer import GuardGraphAnalyzer
 from .config import GuardGraphConfig, default_config, load_config
 from .markdown_report import render_markdown_report
 from .parser import FastAPIEndpointExtractor
+from .sarif import render_sarif_report
 
 
 def analyze_path(path: str | Path) -> dict:
@@ -15,18 +16,21 @@ def analyze_path(path: str | Path) -> dict:
     return GuardGraphAnalyzer(extractor).analyze()
 
 
-def run_with_config(config: GuardGraphConfig, *, target_override: str | None = None) -> dict:
+def run_with_config(config: GuardGraphConfig, *, target_override: str | None = None, sarif_path: str | None = None) -> dict:
     target_path = target_override or config.target.path
     report = analyze_path(target_path)
-    _write_reports(report, json_path=config.report.json, markdown_path=config.report.markdown)
+    _write_reports(report, json_path=config.report.json, markdown_path=config.report.markdown, sarif_path=sarif_path)
     return report
 
 
-def _write_reports(report: dict, *, json_path: str | None, markdown_path: str | None) -> None:
+def _write_reports(report: dict, *, json_path: str | None, markdown_path: str | None, sarif_path: str | None = None) -> None:
     if json_path:
         Path(json_path).write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     if markdown_path:
         Path(markdown_path).write_text(render_markdown_report(report), encoding="utf-8")
+    if sarif_path:
+        sarif = render_sarif_report(report)
+        Path(sarif_path).write_text(json.dumps(sarif, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def main() -> None:
@@ -36,6 +40,7 @@ def main() -> None:
     parser.add_argument("--config", "-c", help="Path to guardgraph.yml")
     parser.add_argument("--output", "-o", help="Write JSON report to this path")
     parser.add_argument("--markdown", "-m", help="Write human-readable Markdown report to this path")
+    parser.add_argument("--sarif", help="Write SARIF 2.1.0 report to this path")
     args = parser.parse_args()
 
     if args.config:
@@ -51,8 +56,8 @@ def main() -> None:
 
     report = analyze_path(target_path)
 
-    if json_out or md_out:
-        _write_reports(report, json_path=json_out, markdown_path=md_out)
+    if json_out or md_out or args.sarif:
+        _write_reports(report, json_path=json_out, markdown_path=md_out, sarif_path=args.sarif)
     else:
         print(json.dumps(report, indent=2, ensure_ascii=False))
 
