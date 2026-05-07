@@ -66,6 +66,8 @@ def _build_rules(findings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             continue
         title = finding.get("title") or _METRIC_TITLE.get(metric, metric.replace("_", " ").title())
         level = finding.get("risk_level", "MEDIUM")
+        owasp = finding.get("owasp_category") or "A04:2021-Insecure Design"
+        cwe = finding.get("cwe") or []
         rules[metric] = {
             "id": metric,
             "name": title,
@@ -73,9 +75,11 @@ def _build_rules(findings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "fullDescription": {"text": finding.get("summary", title)},
             "help": {"text": finding.get("recommendation", "Review this structural risk zone.")},
             "properties": {
-                "tags": ["security", "structural-appsec", "guardgraph"],
+                "tags": ["security", "structural-appsec", "guardgraph", owasp, *cwe],
                 "security-severity": _LEVEL_TO_SECURITY_SEVERITY.get(level, "5.0"),
                 "precision": "medium",
+                "owasp_category": owasp,
+                "cwe": cwe,
             },
         }
     return rules
@@ -119,6 +123,8 @@ def _finding_to_result(finding: dict[str, Any]) -> dict[str, Any]:
             "exploit_confirmed": finding.get("exploit_confirmed", False),
             "action_class": finding.get("action_class"),
             "display_name": finding.get("name"),
+            "owasp_category": finding.get("owasp_category"),
+            "cwe": finding.get("cwe", []),
             "missing_obligations": finding.get("missing_obligations", []),
         },
     }
