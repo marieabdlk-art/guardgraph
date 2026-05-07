@@ -6,10 +6,15 @@ from guardgraph.config import load_config
 
 ROOT = Path(__file__).parent / "test_app"
 FIXTURES = Path(__file__).resolve().parents[1] / "benchmarks" / "fixtures"
+DI_APP = Path(__file__).resolve().parents[1] / "benchmarks" / "fastapi_di_app"
 
 
 def metrics(report):
     return {finding["metric"] for finding in report["findings"]}
+
+
+def handlers_by_metric(report, metric):
+    return {finding["endpoint"]["handler"] for finding in report["findings"] if finding["metric"] == metric}
 
 
 def test_guardgraph_detects_core_structural_gaps():
@@ -19,6 +24,24 @@ def test_guardgraph_detects_core_structural_gaps():
     assert "PUBLIC_MUTATION" in found
     assert "MISSING_OWNERSHIP_BOUNDARY" in found
     assert "RAW_INPUT_TO_SINK" in found
+
+
+def test_fastapi_dependency_injection_benchmark_auth_boundaries():
+    report = analyze_path(DI_APP)
+    public_mutation_handlers = handlers_by_metric(report, "PUBLIC_MUTATION")
+
+    assert "delete_item_without_dependency" in public_mutation_handlers
+    assert "delete_item_direct" not in public_mutation_handlers
+    assert "delete_item_router_level" not in public_mutation_handlers
+    assert "delete_item_route_level" not in public_mutation_handlers
+    assert "delete_item_annotated" not in public_mutation_handlers
+    assert "delete_admin_item" not in public_mutation_handlers
+
+
+def test_fastapi_dependency_injection_benchmark_public_action_is_not_auth_required():
+    report = analyze_path(DI_APP)
+    flagged_handlers = {finding["endpoint"]["handler"] for finding in report["findings"]}
+    assert "register" not in flagged_handlers
 
 
 def test_guardgraph_detects_unsafe_upload_boundary_fixture():
