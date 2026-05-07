@@ -25,8 +25,8 @@ jobs:
         run: pip install -e .[dev]
       - name: Run tests
         run: pytest -q
-      - name: Run GuardGraph demo
-        run: python -m guardgraph.cli tests/test_app -o guardgraph_report.json -m guardgraph_report.md
+      - name: Run GuardGraph demo from config
+        run: python -m guardgraph --config guardgraph.yml
       - name: Print GuardGraph Markdown report in logs
         run: |
           echo "===== GUARDGRAPH MARKDOWN REPORT ====="
