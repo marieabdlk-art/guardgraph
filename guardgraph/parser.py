@@ -37,6 +37,7 @@ class FastAPIEndpointExtractor:
                 tree = ast.parse(py_file.read_text(encoding="utf-8"))
             except SyntaxError:
                 continue
+            self._normalize_keyword_only_endpoint_params(tree)
             self.trees.append((py_file, tree))
             self.router_prefix_by_file[str(py_file)] = self._extract_router_prefix(tree)
             self.router_dependencies_by_file[str(py_file)] = self._extract_router_dependencies(tree)
@@ -45,6 +46,19 @@ class FastAPIEndpointExtractor:
             for fn in walk_functions(tree):
                 self.func_index[(str(py_file), fn.name)] = fn
         return self
+
+    def _normalize_keyword_only_endpoint_params(self, tree: ast.AST) -> None:
+        for fn in walk_functions(tree):
+            if not self._extract_route_from_function(fn):
+                continue
+            if not fn.args.kwonlyargs:
+                continue
+            for arg, default in zip(fn.args.kwonlyargs, fn.args.kw_defaults):
+                fn.args.args.append(arg)
+                if default is not None:
+                    fn.args.defaults.append(default)
+            fn.args.kwonlyargs = []
+            fn.args.kw_defaults = []
 
     def _extract_router_prefix(self, tree: ast.AST) -> str:
         for node in ast.walk(tree):
