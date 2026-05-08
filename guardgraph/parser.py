@@ -16,7 +16,8 @@ class FastAPIEndpointExtractor:
     - router-level dependencies=[Depends(...)]
     - @router.get/post/put/delete/patch("/path")
     - route-level dependencies=[Depends(...)]
-    - Pydantic BaseModel classes
+    - Annotated dependency aliases such as CurrentUser = Annotated[..., Depends(...)]
+    - Pydantic / SQLModel schema classes
     """
 
     def __init__(self, root: str | Path):
@@ -28,6 +29,7 @@ class FastAPIEndpointExtractor:
         self.router_dependencies_by_file: dict[str, list[str]] = {}
         self.route_dependencies_by_endpoint: dict[tuple[str, str], list[str]] = {}
         self.pydantic_models: set[str] = set()
+        self.dependency_aliases: dict[str, set[str]] = {}
 
     def parse(self) -> "FastAPIEndpointExtractor":
         for py_file in self.root.rglob("*.py"):
@@ -35,13 +37,28 @@ class FastAPIEndpointExtractor:
                 tree = ast.parse(py_file.read_text(encoding="utf-8"))
             except SyntaxError:
                 continue
+            self._normalize_keyword_only_endpoint_params(tree)
             self.trees.append((py_file, tree))
             self.router_prefix_by_file[str(py_file)] = self._extract_router_prefix(tree)
             self.router_dependencies_by_file[str(py_file)] = self._extract_router_dependencies(tree)
             self.pydantic_models |= self._extract_pydantic_models(tree)
+            self.dependency_aliases.update(self._extract_dependency_aliases(tree))
             for fn in walk_functions(tree):
                 self.func_index[(str(py_file), fn.name)] = fn
         return self
+
+    def _normalize_keyword_only_endpoint_params(self, tree: ast.AST) -> None:
+        for fn in walk_functions(tree):
+            if not self._extract_route_from_function(fn):
+                continue
+            if not fn.args.kwonlyargs:
+                continue
+            for arg, default in zip(fn.args.kwonlyargs, fn.args.kw_defaults):
+                fn.args.args.append(arg)
+                if default is not None:
+                    fn.args.defaults.append(default)
+            fn.args.kwonlyargs = []
+            fn.args.kw_defaults = []
 
     def _extract_router_prefix(self, tree: ast.AST) -> str:
         for node in ast.walk(tree):
@@ -78,11 +95,39 @@ class FastAPIEndpointExtractor:
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 for base in node.bases:
-                    if isinstance(base, ast.Name) and base.id == "BaseModel":
+                    base_src = node_to_source(base)
+                    if base_src in {"BaseModel", "pydantic.BaseModel", "SQLModel", "sqlmodel.SQLModel"}:
                         models.add(node.name)
-                    if isinstance(base, ast.Attribute) and base.attr == "BaseModel":
+                    elif base_src.endswith(".BaseModel") or base_src.endswith(".SQLModel"):
                         models.add(node.name)
         return models
+
+    def _extract_dependency_aliases(self, tree: ast.AST) -> dict[str, set[str]]:
+        aliases: dict[str, set[str]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                targets = [node.target.id]
+            else:
+                continue
+            if not targets:
+                continue
+            value_src = node_to_source(node.value)
+            low = value_src.lower()
+            if "depends" not in low:
+                continue
+            guard_types: set[str] = set()
+            for target in targets:
+                target_low = target.lower()
+                if any(k in low or k in target_low for k in ["current_user", "get_current_user", "auth", "token", "user"]):
+                    guard_types.add("AUTH_CHECK")
+                if any(k in low or k in target_low for k in ["admin", "superuser", "permission", "role"]):
+                    guard_types.add("AUTH_CHECK")
+                    guard_types.add("ADMIN_GATE")
+                if guard_types:
+                    aliases[target] = set(guard_types)
+        return aliases
 
     def extract_endpoints(self) -> list[Endpoint]:
         endpoints: list[Endpoint] = []

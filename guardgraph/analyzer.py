@@ -10,13 +10,9 @@ from .utils import contains_keywords, get_call_name, has_fstring, is_resource_id
 
 
 class GuardGraphAnalyzer:
-    """GuardGraph MVP analyzer.
+    """GuardGraph MVP analyzer."""
 
-    It maps each endpoint as an application action, infers required security
-    obligations, matches observed guards, and reports structural gaps.
-    """
-
-    VERSION = "0.4.2"
+    VERSION = "0.4.3"
 
     def __init__(self, extractor: FastAPIEndpointExtractor):
         self.extractor = extractor
@@ -31,7 +27,6 @@ class GuardGraphAnalyzer:
             obligations = self.infer_obligations(ep, facts)
             gaps = self.find_gaps(obligations, facts)
             findings.extend(self.build_findings(ep, facts, gaps))
-
         findings = sorted(findings, key=lambda f: f.risk_score, reverse=True)
         for i, finding in enumerate(findings, start=1):
             finding.id = f"GG-{i:03d}"
@@ -65,10 +60,7 @@ class GuardGraphAnalyzer:
         args = list(fn.args.args)
         defaults = list(fn.args.defaults)
         default_offset = len(args) - len(defaults)
-        default_by_arg = {
-            args[i].arg: defaults[i - default_offset]
-            for i in range(default_offset, len(args))
-        }
+        default_by_arg = {args[i].arg: defaults[i - default_offset] for i in range(default_offset, len(args))}
         for arg in args:
             if arg.arg in {"self", "cls"}:
                 continue
@@ -78,19 +70,22 @@ class GuardGraphAnalyzer:
         return params
 
     def _decorator_call_ids(self, fn: ast.AST) -> set[int]:
-        """Return AST ids for decorator calls so they are not treated as runtime operations."""
         return {id(node) for dec in getattr(fn, "decorator_list", []) for node in ast.walk(dec)}
+
+    def _add_guard(self, guards: list[ObservedGuard], guard_type: str, ep: Endpoint, evidence: str, confidence: str = "HIGH") -> None:
+        if not any(g.type == guard_type and g.evidence == evidence for g in guards):
+            guards.append(ObservedGuard(guard_type, ep.file, ep.line, evidence, confidence))
 
     def _add_dependency_guard(self, guards: list[ObservedGuard], ep: Endpoint, evidence: str, source: str) -> None:
         low = evidence.lower()
         if "depends" not in low:
             return
         if any(k in low for k in ["admin", "permission", "role", "superuser"]):
-            guards.append(ObservedGuard("AUTH_CHECK", ep.file, ep.line, f"{source}: {evidence}", "HIGH"))
-            guards.append(ObservedGuard("ADMIN_GATE", ep.file, ep.line, f"{source}: {evidence}", "HIGH"))
+            self._add_guard(guards, "AUTH_CHECK", ep, f"{source}: {evidence}")
+            self._add_guard(guards, "ADMIN_GATE", ep, f"{source}: {evidence}")
             return
-        if any(k in low for k in ["get_current_user", "current_user", "auth", "jwt", "token", "user"]):
-            guards.append(ObservedGuard("AUTH_CHECK", ep.file, ep.line, f"{source}: {evidence}", "HIGH"))
+        if any(k in low for k in ["get_current_user", "current_user", "auth", "jwt", "user"]):
+            self._add_guard(guards, "AUTH_CHECK", ep, f"{source}: {evidence}")
 
     def detect_guards(self, fn: ast.AST, ep: Endpoint) -> list[ObservedGuard]:
         guards: list[ObservedGuard] = []
@@ -101,8 +96,12 @@ class GuardGraphAnalyzer:
             self._add_dependency_guard(guards, ep, dep, "route_dependency")
 
         for param in self.extract_params(fn):
-            text = f"{param.get('default') or ''} {param['name']} {param.get('annotation') or ''}"
+            annotation = param.get("annotation") or ""
+            default = param.get("default") or ""
+            text = f"{default} {param['name']} {annotation}"
             self._add_dependency_guard(guards, ep, text, "param_dependency")
+            for alias_guard in self.extractor.dependency_aliases.get(annotation, set()):
+                self._add_guard(guards, alias_guard, ep, f"alias_dependency: {param['name']}: {annotation}")
 
         decorator_ids = self._decorator_call_ids(fn)
         for node in ast.walk(fn):
@@ -113,23 +112,35 @@ class GuardGraphAnalyzer:
             if isinstance(node, ast.Call):
                 call_name = get_call_name(node).lower()
                 if any(k in call_name for k in ["require_admin", "admin_required", "is_admin"]):
-                    guards.append(ObservedGuard("ADMIN_GATE", ep.file, getattr(node, "lineno", ep.line), src, "HIGH"))
+                    self._add_guard(guards, "ADMIN_GATE", ep, src)
                 if any(k in call_name for k in ["require_auth", "jwt_required", "login_required"]):
-                    guards.append(ObservedGuard("AUTH_CHECK", ep.file, getattr(node, "lineno", ep.line), src, "HIGH"))
+                    self._add_guard(guards, "AUTH_CHECK", ep, src)
             if isinstance(node, ast.If):
                 if contains_keywords(low, ["current_user.role", ".role", "is_admin", "is_superuser"]):
-                    guards.append(ObservedGuard("ROLE_GATE", ep.file, node.lineno, src, "HIGH"))
-                if contains_keywords(low, ["user_id", "owner_id", "author_id", "tenant_id"]) and contains_keywords(low, ["current_user.id", "user.id"]):
-                    guards.append(ObservedGuard("OWNERSHIP_CHECK", ep.file, node.lineno, src, "HIGH"))
+                    self._add_guard(guards, "ROLE_GATE", ep, src)
+                if (
+                    contains_keywords(low, ["user_id", "owner_id", "author_id", "tenant_id", "current_user", "user == current_user"])
+                    and contains_keywords(low, ["current_user.id", "user.id", "current_user", "is_superuser"])
+                ):
+                    self._add_guard(guards, "OWNERSHIP_CHECK", ep, src, "MEDIUM")
         return guards
+
+    def _looks_like_schema(self, annotation: str) -> bool:
+        if not annotation or annotation in self.extractor.dependency_aliases:
+            return False
+        if annotation in {"int", "str", "float", "bool", "uuid.UUID", "UUID"}:
+            return False
+        if annotation in self.extractor.pydantic_models:
+            return True
+        return annotation[:1].isupper() and any(s in annotation for s in ["Create", "Update", "Register", "Payload", "Schema", "Public"])
 
     def detect_validators(self, fn: ast.AST, params: list[dict[str, Any]]) -> list[ObservedGuard]:
         validators: list[ObservedGuard] = []
         for param in params:
             annotation = param.get("annotation") or ""
             default = param.get("default") or ""
-            if annotation in self.extractor.pydantic_models:
-                validators.append(ObservedGuard("PYDANTIC_VALIDATION", "<signature>", getattr(fn, "lineno", 0), f"{param['name']}: {annotation}", "HIGH"))
+            if self._looks_like_schema(annotation):
+                validators.append(ObservedGuard("SCHEMA_VALIDATION", "<signature>", getattr(fn, "lineno", 0), f"{param['name']}: {annotation}", "MEDIUM"))
             elif annotation in {"int", "str", "float", "bool"}:
                 validators.append(ObservedGuard("TYPE_VALIDATION", "<signature>", getattr(fn, "lineno", 0), f"{param['name']}: {annotation}", "MEDIUM"))
             elif "UploadFile" in annotation and "File(" in default:
@@ -169,7 +180,6 @@ class GuardGraphAnalyzer:
         if upload_params:
             evidence = ", ".join(f"{p['name']}: {p.get('annotation') or '?'} = {p.get('default') or '?'}" for p in upload_params)
             ops.append(Operation("UPLOAD_OP", "fastapi.upload", ep.file, ep.line, evidence, 0.95))
-
         decorator_ids = self._decorator_call_ids(fn)
         for node in ast.walk(fn):
             if not isinstance(node, ast.Call) or id(node) in decorator_ids:
@@ -218,7 +228,6 @@ class GuardGraphAnalyzer:
         handler_low = ep.handler.lower()
         text = f"{path_low} {handler_low}"
         op_types = {op.type for op in facts["operations"]}
-
         if "UPLOAD_OP" in op_types or any(k in text for k in ["upload", "plugin"]):
             return "UPLOAD_ACTION"
         if ep.method == "POST" and any(k in text for k in ["signup", "sign_up", "register", "registration", "create_user", "/api/users/"]):
@@ -231,7 +240,6 @@ class GuardGraphAnalyzer:
             return "PUBLIC_CONTACT_ACTION"
         if any(k in text for k in ["search", "query", "lookup", "find"]):
             return "SEARCH_ACTION"
-
         if "PAYMENT_OP" in op_types or any(k in path_low for k in ["pay", "payment", "refund", "charge"]):
             return "PAYMENT_ACTION"
         if any(k in path_low for k in ["admin", "settings"]):
@@ -247,24 +255,20 @@ class GuardGraphAnalyzer:
     def infer_obligations(self, ep: Endpoint, facts: dict[str, Any]) -> list[str]:
         action = ep.action_class or self.classify_action(ep, facts)
         obligations: list[str] = []
-
         if action in {"USER_REGISTRATION_ACTION", "AUTH_SESSION_ACTION", "PASSWORD_RESET_ACTION", "PUBLIC_CONTACT_ACTION"}:
             obligations.append("VALIDATION_REQUIRED")
             obligations.append("ABUSE_PROTECTION_RECOMMENDED")
             if action in {"AUTH_SESSION_ACTION", "PASSWORD_RESET_ACTION"}:
                 obligations.append("RATE_LIMIT_RECOMMENDED")
             return obligations
-
         if action == "SEARCH_ACTION":
             obligations.append("VALIDATION_REQUIRED")
             if any(s.type == "RAW_SQL" and s.danger >= 0.8 for s in facts["sinks"]):
                 obligations.append("SAFE_SINK_REQUIRED")
             return obligations
-
         if action == "UPLOAD_ACTION":
             obligations.extend(["AUTH_REQUIRED", "ROLE_OR_PERMISSION_REQUIRED", "UPLOAD_VALIDATION_REQUIRED"])
             return obligations
-
         if action in {"USER_RESOURCE_READ", "USER_RESOURCE_MUTATION", "DESTRUCTIVE_ACTION", "PAYMENT_ACTION", "ADMIN_ACTION", "STATE_MUTATION"}:
             obligations.append("AUTH_REQUIRED")
         if action in {"USER_RESOURCE_READ", "USER_RESOURCE_MUTATION"}:
@@ -300,34 +304,22 @@ class GuardGraphAnalyzer:
     def build_findings(self, ep: Endpoint, facts: dict[str, Any], gaps: list[str]) -> list[Finding]:
         out: list[Finding] = []
         legit_public_actions = {"USER_REGISTRATION_ACTION", "AUTH_SESSION_ACTION", "PASSWORD_RESET_ACTION", "PUBLIC_CONTACT_ACTION"}
-
         if ep.action_class == "UPLOAD_ACTION" and any(g in gaps for g in ["AUTH_REQUIRED", "ROLE_OR_PERMISSION_REQUIRED", "UPLOAD_VALIDATION_REQUIRED"]):
             level = "CRITICAL" if "AUTH_REQUIRED" in gaps else "HIGH"
             score = 0.94 if level == "CRITICAL" else 0.76
             out.append(self.make_finding(ep, facts, "UNRESTRICTED_UPLOAD_BOUNDARY", "Открытая загрузка", level, score, "Upload or plugin mutation action is reachable without visible upload-specific security boundaries.", [g for g in ["AUTH_REQUIRED", "ROLE_OR_PERMISSION_REQUIRED", "UPLOAD_VALIDATION_REQUIRED"] if g in gaps]))
-
-        if (
-            ep.action_class not in legit_public_actions
-            and ep.action_class not in {"PAYMENT_ACTION", "ADMIN_ACTION", "SEARCH_ACTION", "UPLOAD_ACTION"}
-            and "AUTH_REQUIRED" in gaps
-            and (ep.method == "DELETE" or any(op.type in {"WRITE_OP", "DELETE_OP", "PAYMENT_OP"} for op in facts["operations"]))
-        ):
+        if ep.action_class not in legit_public_actions and ep.action_class not in {"PAYMENT_ACTION", "ADMIN_ACTION", "SEARCH_ACTION", "UPLOAD_ACTION"} and "AUTH_REQUIRED" in gaps and (ep.method == "DELETE" or any(op.type in {"WRITE_OP", "DELETE_OP", "PAYMENT_OP"} for op in facts["operations"])):
             out.append(self.make_finding(ep, facts, "PUBLIC_MUTATION", "Слепой переход", "CRITICAL", 0.90, "Endpoint performs a state-changing operation without a visible authentication boundary.", ["AUTH_REQUIRED"]))
-
         if "OWNERSHIP_REQUIRED" in gaps:
             out.append(self.make_finding(ep, facts, "MISSING_OWNERSHIP_BOUNDARY", "Чужой паспорт", "HIGH", 0.82, "Endpoint uses a user-controlled resource identifier without a visible ownership boundary.", ["OWNERSHIP_REQUIRED"]))
-
         if "SAFE_SINK_REQUIRED" in gaps:
             out.append(self.make_finding(ep, facts, "RAW_INPUT_TO_SINK", "Голый провод", "HIGH", 0.78, "User-controlled input reaches a raw SQL or sensitive sink without visible safe handling.", ["SAFE_SINK_REQUIRED"]))
-
         if ep.action_class in {"PAYMENT_ACTION", "ADMIN_ACTION"} and ("AUTH_REQUIRED" in gaps or "ROLE_OR_PERMISSION_REQUIRED" in gaps):
             level = "CRITICAL" if "AUTH_REQUIRED" in gaps else "HIGH"
             score = 0.95 if level == "CRITICAL" else 0.74
             out.append(self.make_finding(ep, facts, "CRITICAL_ACTION_WEAK_ZONE", "Кнопка без крышки", level, score, "Critical payment/admin action is reachable without a visible strong permission boundary.", [g for g in ["AUTH_REQUIRED", "ROLE_OR_PERMISSION_REQUIRED"] if g in gaps]))
-
         if ep.action_class in legit_public_actions and "VALIDATION_REQUIRED" in gaps:
             out.append(self.make_finding(ep, facts, "PUBLIC_ACTION_UNVALIDATED", "Открытая форма", "MEDIUM", 0.42, "Public action is intentionally unauthenticated, but no visible input validation was detected.", ["VALIDATION_REQUIRED"]))
-
         return out
 
     def make_finding(self, ep: Endpoint, facts: dict[str, Any], metric: str, name: str, level: str, score: float, summary: str, missing: list[str]) -> Finding:
@@ -344,14 +336,7 @@ class GuardGraphAnalyzer:
             endpoint={"method": ep.method, "path": ep.full_path, "handler": ep.handler, "file": ep.file, "line": ep.line},
             action_class=ep.action_class,
             summary=summary,
-            evidence={
-                "params": facts["params"],
-                "observed_guards": [asdict(g) for g in facts["guards"]],
-                "validators": [asdict(v) for v in facts["validators"]],
-                "operations": [asdict(o) for o in facts["operations"]],
-                "sinks": [asdict(s) for s in facts["sinks"]],
-                "raw_inputs": facts["raw_inputs"],
-            },
+            evidence={"params": facts["params"], "observed_guards": [asdict(g) for g in facts["guards"]], "validators": [asdict(v) for v in facts["validators"]], "operations": [asdict(o) for o in facts["operations"]], "sinks": [asdict(s) for s in facts["sinks"]], "raw_inputs": facts["raw_inputs"]},
             flow=self.format_flow(ep, facts),
             missing_obligations=missing,
             recommendation=self.recommendation(metric),
@@ -389,17 +374,8 @@ class GuardGraphAnalyzer:
         for finding in findings:
             dist[finding.risk_level] += 1
         return {
-            "meta": {
-                "tool": "guardgraph",
-                "version": self.VERSION,
-                "mode": "threefold-structural-gap-analysis-with-business-action-classification",
-                "target": {"language": "python", "framework": "fastapi", "entry_path": str(self.extractor.root)},
-                "statistics": {"endpoints_found": len(self.endpoints), "structural_gaps_found": len(findings), "risk_distribution": dist},
-            },
+            "meta": {"tool": "guardgraph", "version": self.VERSION, "mode": "threefold-structural-gap-analysis-with-business-action-classification", "target": {"language": "python", "framework": "fastapi", "entry_path": str(self.extractor.root)}, "statistics": {"endpoints_found": len(self.endpoints), "structural_gaps_found": len(findings), "risk_distribution": dist}},
             "endpoints": [asdict(ep) for ep in self.endpoints],
             "findings": [finding.to_dict() for finding in findings],
-            "summary": {
-                "top_risks": [finding.id for finding in findings[:5]],
-                "architectural_recommendation": "Add centralized auth, ownership checks for user-owned resources, upload validation, and safe validated data access patterns.",
-            },
+            "summary": {"top_risks": [finding.id for finding in findings[:5]], "architectural_recommendation": "Add centralized auth, ownership checks for user-owned resources, upload validation, and safe validated data access patterns."},
         }

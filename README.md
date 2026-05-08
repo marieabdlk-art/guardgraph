@@ -48,6 +48,19 @@ Each finding includes:
 - `owasp_category`
 - `cwe`
 
+## FastAPI Dependency Injection benchmark
+
+GuardGraph includes a focused FastAPI Dependency Injection benchmark covering:
+
+- direct `Depends(get_current_user)`
+- `Annotated[..., Depends(...)]`
+- route-level `dependencies=[Depends(...)]`
+- router-level `dependencies=[Depends(...)]`
+- nested admin-style dependencies
+- legitimate public actions such as registration
+
+The benchmark checks that protected endpoints are not reported as missing authentication, while an intentionally unprotected control endpoint is reported.
+
 ## Legitimate public actions
 
 GuardGraph distinguishes dangerous public mutations from legitimate unauthenticated actions:
@@ -203,7 +216,3 @@ GuardGraph asks:
 > Given what this endpoint does, which security obligations must exist, and are they visible in the code path?
 
 That makes access-control and ownership gaps first-class findings rather than incidental patterns.
-
-## v0.4.1 smoke test
-
-This line exists only to verify OWASP/CWE metadata and Code Scanning documentation.

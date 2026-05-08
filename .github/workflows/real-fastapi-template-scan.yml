@@ -1,0 +1,58 @@
+name: Real FastAPI Template GuardGraph Scan
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  security-events: write
+
+jobs:
+  scan-fastapi-template:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GuardGraph
+        uses: actions/checkout@v4
+        with:
+          path: guardgraph
+
+      - name: Checkout FastAPI full-stack template
+        uses: actions/checkout@v4
+        with:
+          repository: fastapi/full-stack-fastapi-template
+          path: target-template
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install GuardGraph
+        working-directory: guardgraph
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run GuardGraph on real FastAPI template
+        run: |
+          python -m guardgraph target-template/backend/app \
+            -o real_fastapi_template_guardgraph.json \
+            -m real_fastapi_template_guardgraph.md \
+            --sarif real_fastapi_template_guardgraph.sarif
+
+      - name: Print summary
+        run: |
+          echo "===== REAL FASTAPI TEMPLATE GUARDGRAPH REPORT ====="
+          cat real_fastapi_template_guardgraph.md
+
+      - name: Upload real-project reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-fastapi-template-guardgraph-reports
+          path: |
+            real_fastapi_template_guardgraph.json
+            real_fastapi_template_guardgraph.md
+            real_fastapi_template_guardgraph.sarif
