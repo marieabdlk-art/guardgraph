@@ -39,6 +39,7 @@ Detected structural gaps:
 | Raw Input to Sensitive Sink | Голый провод | `RAW_INPUT_TO_SINK` | A03 / CWE-89, CWE-20 | Raw input reaches SQL/sensitive sink without safe handling |
 | Critical Action Without Guard | Кнопка без крышки | `CRITICAL_ACTION_WEAK_ZONE` | A01 / CWE-862, CWE-732 | Payment/admin action exposed without strong permission boundary |
 | Unvalidated Public Entry | Открытая форма | `PUBLIC_ACTION_UNVALIDATED` | A04 / CWE-20, CWE-770 | Legit public action without visible validation |
+| Unsafe Upload Boundary | Открытая загрузка | `UNRESTRICTED_UPLOAD_BOUNDARY` | A01 / CWE-434, CWE-284 | Upload/plugin action without visible upload-specific boundaries |
 
 Each finding includes:
 
@@ -57,9 +58,17 @@ GuardGraph includes a focused FastAPI Dependency Injection benchmark covering:
 - route-level `dependencies=[Depends(...)]`
 - router-level `dependencies=[Depends(...)]`
 - nested admin-style dependencies
+- dependency aliases such as `CurrentUser = Annotated[..., Depends(get_current_user)]`
+- keyword-only FastAPI endpoint parameters after `*`
 - legitimate public actions such as registration
 
 The benchmark checks that protected endpoints are not reported as missing authentication, while an intentionally unprotected control endpoint is reported.
+
+GuardGraph v0.4.3 was also smoke-tested against `fastapi/full-stack-fastapi-template` on `backend/app`:
+
+- endpoints found: 23
+- critical/high findings on protected `CurrentUser` endpoints: 0
+- remaining findings: 2 medium public-entry review notes
 
 ## Legitimate public actions
 
@@ -126,7 +135,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run GuardGraph
-        uses: marieabdlk-art/guardgraph@v0.4.1
+        uses: marieabdlk-art/guardgraph@v0.4.3
         with:
           config-path: guardgraph.yml
           pr-comment: "true"
@@ -138,7 +147,7 @@ Direct target mode is also supported:
 
 ```yaml
 - name: Run GuardGraph
-  uses: marieabdlk-art/guardgraph@v0.4.1
+  uses: marieabdlk-art/guardgraph@v0.4.3
   with:
     target-path: app
     json-output: guardgraph_report.json
@@ -171,7 +180,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run GuardGraph
-        uses: marieabdlk-art/guardgraph@v0.4.1
+        uses: marieabdlk-art/guardgraph@v0.4.3
         with:
           config-path: guardgraph.yml
           pr-comment: "true"
