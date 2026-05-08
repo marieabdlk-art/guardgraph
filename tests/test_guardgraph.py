@@ -77,7 +77,7 @@ def test_safe_update_order_is_not_flagged():
 def test_report_shape():
     report = analyze_path(ROOT)
     assert report["meta"]["tool"] == "guardgraph"
-    assert report["meta"]["version"] == "0.4.2"
+    assert report["meta"]["version"] == "0.4.3"
     assert report["meta"]["statistics"]["endpoints_found"] >= 10
     assert isinstance(report["findings"], list)
     first = report["findings"][0]
