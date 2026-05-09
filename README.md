@@ -1,167 +1,185 @@
-# GuardGraph
+<p align="center">
+  <img src="docs/assets/guardgraph-banner.svg" alt="GuardGraph banner" width="100%" />
+</p>
 
-**GuardGraph** is a structural AppSec review action for FastAPI applications.
+<h1 align="center">GuardGraph</h1>
 
-Traditional scanners usually search for known dangerous patterns: unsafe functions, vulnerable dependencies, suspicious calls, or source-to-sink flows.
+<p align="center">
+  <b>Structural AppSec review for FastAPI applications.</b>
+  <br />
+  Detect missing auth, ownership, validation, and sensitive-action boundaries.
+</p>
 
-GuardGraph looks for a different class of risk: **missing security boundaries around sensitive application actions**.
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-blue">
+  <img alt="Framework" src="https://img.shields.io/badge/framework-FastAPI-009688">
+  <img alt="Output" src="https://img.shields.io/badge/output-SARIF-orange">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="Status" src="https://img.shields.io/badge/status-MVP-purple">
+</p>
+
+---
+
+## What is GuardGraph?
+
+Traditional scanners usually search for:
+
+- unsafe functions;
+- vulnerable dependencies;
+- dangerous source-to-sink flows;
+- known signatures.
+
+GuardGraph focuses on a different class of risk:
+
+> missing security boundaries around sensitive application actions.
 
 For every endpoint, GuardGraph asks:
 
 1. What does this endpoint do?
-2. What data does it accept?
-3. What resource does it access or mutate?
-4. What security obligations should protect this action?
-5. Are those protections visible in the code path?
+2. What resource does it access or mutate?
+3. Which security obligations should protect this action?
+4. Are those protections visible in the code path?
+
+---
+
+## Threefold Structural Gap Analysis
+
+```text
+user input
+    ↓
+endpoint action classification
+    ↓
+required security obligations
+    ↓
+observed guards / boundaries
+    ↓
+structural gap detection
+```
 
 GuardGraph builds three structural views:
 
-- **Data Exposure Graph** — user-controlled input, validation, and sensitive sinks.
-- **Access Boundary Graph** — authentication, authorization, ownership, and role checks.
-- **State Mutation Graph** — writes, deletes, payments, admin operations, uploads, and external side effects.
+| Graph | Purpose |
+|---|---|
+| `DataExposureGraph` | Tracks user-controlled input, validation, and sensitive sinks |
+| `AccessBoundaryGraph` | Tracks auth, ownership, permissions, and dependency boundaries |
+| `StateMutationGraph` | Tracks writes, deletes, payments, uploads, and admin actions |
 
-Then it performs **Threefold Structural Gap Analysis**:
+Implementation modules:
 
-> sensitive action + required protection missing or not visible = structural risk
+```text
+guardgraph/analyzer.py
+guardgraph/graphs.py
+guardgraph/parser.py
+```
 
-GuardGraph does **not** claim that every finding is a confirmed exploit. It reports explainable structural risk zones that deserve review before they become vulnerabilities.
+---
 
-## MVP scope
+## Detection classes
 
-Current MVP focuses on **Python + FastAPI**.
+| English title | Display label | Internal metric | OWASP / CWE |
+|---|---|---|---|
+| Unguarded State Change | Слепой переход | `PUBLIC_MUTATION` | A01 / CWE-862, CWE-306 |
+| Missing Ownership Boundary | Чужой паспорт | `MISSING_OWNERSHIP_BOUNDARY` | A01 / CWE-639, CWE-862 |
+| Raw Input to Sensitive Sink | Голый провод | `RAW_INPUT_TO_SINK` | A03 / CWE-89, CWE-20 |
+| Critical Action Without Guard | Кнопка без крышки | `CRITICAL_ACTION_WEAK_ZONE` | A01 / CWE-862, CWE-732 |
+| Unvalidated Public Entry | Открытая форма | `PUBLIC_ACTION_UNVALIDATED` | A04 / CWE-20, CWE-770 |
+| Unsafe Upload Boundary | Открытая загрузка | `UNRESTRICTED_UPLOAD_BOUNDARY` | A01 / CWE-434, CWE-284 |
 
-Detected structural gaps:
+Every finding includes:
 
-| English title | Display label | Internal metric | OWASP / CWE | Meaning |
-|---|---|---|---|---|
-| Unguarded State Change | Слепой переход | `PUBLIC_MUTATION` | A01 / CWE-862, CWE-306 | State-changing endpoint without visible authentication |
-| Missing Ownership Boundary | Чужой паспорт | `MISSING_OWNERSHIP_BOUNDARY` | A01 / CWE-639, CWE-862 | User-controlled resource ID without visible ownership check |
-| Raw Input to Sensitive Sink | Голый провод | `RAW_INPUT_TO_SINK` | A03 / CWE-89, CWE-20 | Raw input reaches SQL/sensitive sink without safe handling |
-| Critical Action Without Guard | Кнопка без крышки | `CRITICAL_ACTION_WEAK_ZONE` | A01 / CWE-862, CWE-732 | Payment/admin action exposed without strong permission boundary |
-| Unvalidated Public Entry | Открытая форма | `PUBLIC_ACTION_UNVALIDATED` | A04 / CWE-20, CWE-770 | Legit public action without visible validation |
-| Unsafe Upload Boundary | Открытая загрузка | `UNRESTRICTED_UPLOAD_BOUNDARY` | A01 / CWE-434, CWE-284 | Upload/plugin action without visible upload-specific boundaries |
+```json
+{
+  "review_required": true,
+  "exploit_confirmed": false,
+  "evidence_strength": "STRONG",
+  "owasp_category": "A01:2021-Broken Access Control",
+  "cwe": ["CWE-862"]
+}
+```
 
-Each finding includes:
+---
 
-- `review_required: true`
-- `exploit_confirmed: false`
-- `evidence_strength: STRONG | PARTIAL`
-- `owasp_category`
-- `cwe`
+## Example finding
+
+```text
+🚨 CRITICAL
+Critical Action Without Guard
+
+POST /api/pay/process
+
+Observed flow:
+POST /api/pay/process → process_payment → payment_service.charge
+
+Missing obligations:
+- AUTH_REQUIRED
+- ROLE_OR_PERMISSION_REQUIRED
+```
+
+---
 
 ## FastAPI Dependency Injection benchmark
 
-GuardGraph includes a focused FastAPI Dependency Injection benchmark covering:
+GuardGraph includes a dedicated benchmark for real FastAPI dependency patterns:
 
-- direct `Depends(get_current_user)`
+- `Depends(get_current_user)`
 - `Annotated[..., Depends(...)]`
-- route-level `dependencies=[Depends(...)]`
-- router-level `dependencies=[Depends(...)]`
+- route-level dependencies
+- router-level dependencies
+- dependency aliases
+- keyword-only endpoint parameters after `*`
 - nested admin-style dependencies
-- dependency aliases such as `CurrentUser = Annotated[..., Depends(get_current_user)]`
-- keyword-only FastAPI endpoint parameters after `*`
-- legitimate public actions such as registration
 
-The benchmark checks that protected endpoints are not reported as missing authentication, while an intentionally unprotected control endpoint is reported.
+Benchmark location:
 
-GuardGraph v0.4.3 was also smoke-tested against `fastapi/full-stack-fastapi-template` on `backend/app`:
-
-- endpoints found: 23
-- critical/high findings on protected `CurrentUser` endpoints: 0
-- remaining findings: 2 medium public-entry review notes
-
-## Legitimate public actions
-
-GuardGraph distinguishes dangerous public mutations from legitimate unauthenticated actions:
-
-- `USER_REGISTRATION_ACTION`
-- `AUTH_SESSION_ACTION`
-- `PASSWORD_RESET_ACTION`
-- `PUBLIC_CONTACT_ACTION`
-
-These should not require `AUTH_REQUIRED`. They should have validation and abuse/rate-limit protections.
-
-## Configuration
-
-GuardGraph can be configured through `guardgraph.yml`:
-
-```yaml
-target:
-  path: "tests/test_app"
-  language: "python"
-  framework: "fastapi"
-
-report:
-  json: "guardgraph_report.json"
-  markdown: "guardgraph_report.md"
-
-github:
-  pr_comment: true
+```text
+benchmarks/fastapi_di_app/
 ```
+
+### Real-project smoke test
+
+GuardGraph v0.4.3 was smoke-tested against:
+
+```text
+fastapi/full-stack-fastapi-template
+backend/app
+```
+
+Results:
+
+| Metric | Result |
+|---|---|
+| Endpoints found | 23 |
+| Critical findings on protected endpoints | 0 |
+| High findings on protected endpoints | 0 |
+| Remaining findings | 2 medium public-entry review notes |
+
+This validation specifically tested whether GuardGraph incorrectly reports protected `CurrentUser` endpoints as missing authentication.
+
+---
 
 ## Quick start
 
-Run with the config file:
+### Local CLI
 
 ```bash
 python -m guardgraph --config guardgraph.yml --sarif guardgraph_report.sarif
 ```
 
-Or run directly against a target path:
+Or directly:
 
 ```bash
-python -m guardgraph tests/test_app -o guardgraph_report.json -m guardgraph_report.md --sarif guardgraph_report.sarif
+python -m guardgraph tests/test_app \
+  -o guardgraph_report.json \
+  -m guardgraph_report.md \
+  --sarif guardgraph_report.sarif
 ```
 
-## Reusable GitHub Action
+---
 
-GuardGraph can be used as a reusable GitHub Action from another repository:
+## GitHub Action
 
 ```yaml
 name: GuardGraph
-
-on:
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
-
-jobs:
-  guardgraph:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run GuardGraph
-        uses: marieabdlk-art/guardgraph@v0.4.3
-        with:
-          config-path: guardgraph.yml
-          pr-comment: "true"
-          upload-artifacts: "true"
-          sarif-output: guardgraph_report.sarif
-```
-
-Direct target mode is also supported:
-
-```yaml
-- name: Run GuardGraph
-  uses: marieabdlk-art/guardgraph@v0.4.3
-  with:
-    target-path: app
-    json-output: guardgraph_report.json
-    markdown-output: guardgraph_report.md
-    sarif-output: guardgraph_report.sarif
-    pr-comment: "true"
-```
-
-## GitHub Code Scanning example
-
-GuardGraph can generate SARIF and upload it to GitHub Code Scanning:
-
-```yaml
-name: GuardGraph Code Scanning
 
 on:
   pull_request:
@@ -176,6 +194,7 @@ permissions:
 jobs:
   guardgraph:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -187,34 +206,66 @@ jobs:
           upload-artifacts: "true"
           sarif-output: guardgraph_report.sarif
 
-      - name: Upload SARIF to GitHub Code Scanning
+      - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: guardgraph_report.sarif
 ```
 
-## SARIF output
+---
 
-GuardGraph can emit SARIF 2.1.0:
+## SARIF support
+
+GuardGraph emits SARIF 2.1.0 compatible with:
+
+- GitHub Code Scanning
+- GitHub Advanced Security
+- VS Code SARIF viewers
+- IDE integrations
+
+Run:
 
 ```bash
 python -m guardgraph --config guardgraph.yml --sarif guardgraph_report.sarif
 ```
 
-SARIF results preserve GuardGraph metadata such as risk level, confidence, evidence strength, OWASP category, CWE IDs, review requirement, and the fact that exploitability is not confirmed.
+---
 
-## Run tests
+## Project structure
 
-```bash
-pip install -e .[dev]
-pytest
+```text
+guardgraph/
+├── analyzer.py      # core detection pipeline
+├── graphs.py        # structural graph layer definitions
+├── parser.py        # FastAPI AST parsing
+├── cli.py           # CLI entrypoint
+└── models.py        # report models
+
+benchmarks/
+├── fastapi_di_app/
+└── fixtures/
+
+tests/
+└── test_guardgraph.py
 ```
 
-## GitHub Actions
+---
 
-The included workflow uses the local action (`uses: ./`) to run GuardGraph from `guardgraph.yml`, print the Markdown report in logs, add it to the Actions summary, upload JSON/Markdown/SARIF artifacts, and post/update a GuardGraph comment on pull requests.
+## Limitations
 
-## Why not just Semgrep / taint tracking?
+Current MVP limitations:
+
+- Python + FastAPI only
+- heuristic structural analysis
+- not proof of exploitability
+- limited interprocedural analysis
+- findings require human review
+
+GuardGraph reports structural risk zones, not confirmed exploits.
+
+---
+
+## Why not just taint tracking?
 
 Classic taint tracking asks:
 
@@ -224,4 +275,20 @@ GuardGraph asks:
 
 > Given what this endpoint does, which security obligations must exist, and are they visible in the code path?
 
-That makes access-control and ownership gaps first-class findings rather than incidental patterns.
+That makes ownership and access-control gaps first-class findings instead of incidental patterns.
+
+---
+
+## Contributing
+
+See:
+
+```text
+CONTRIBUTING.md
+```
+
+---
+
+## License
+
+MIT License © 2026 A. Abdulkarimova
