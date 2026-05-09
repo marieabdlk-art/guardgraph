@@ -1,107 +1,86 @@
 # Changelog
 
-## v0.3.0 — Reusable GuardGraph Action
+All notable changes to GuardGraph are documented here.
 
-GuardGraph `v0.3.0` turns the MVP into a reusable GitHub Action for structural AppSec review of Python/FastAPI applications.
+## v0.4.3
 
 ### Added
 
-- Reusable composite GitHub Action via `action.yml`.
-- Stable action reference:
+- FastAPI Dependency Injection benchmark.
+- Support for `CurrentUser`-style dependency aliases.
+- Support for keyword-only FastAPI endpoint parameters after `*`.
+- Real-project smoke scan workflow against `fastapi/full-stack-fastapi-template`.
+- Explicit `guardgraph/graphs.py` architecture module for the three conceptual graph layers:
+  - `DataExposureGraph`
+  - `AccessBoundaryGraph`
+  - `StateMutationGraph`
 
-  ```yaml
-  uses: marieabdlk-art/guardgraph@v0.3.0
-  ```
+### Changed
 
-- Config-driven scan mode through `guardgraph.yml`.
-- CLI entrypoint:
+- Reduced false positives on protected FastAPI endpoints using `Depends(...)`, `Annotated[..., Depends(...)]`, and route-level dependencies.
+- Updated README examples to use `marieabdlk-art/guardgraph@v0.4.3`.
+- Updated package version to `0.4.3`.
 
-  ```bash
-  python -m guardgraph --config guardgraph.yml
-  ```
+### Validation
 
-- Markdown report generation.
-- JSON report generation.
-- GitHub Actions job summary output.
-- Pull Request comment publishing and updating.
-- Artifact upload for JSON and Markdown reports.
-- Support for direct target mode:
+Real-project scan on `fastapi/full-stack-fastapi-template/backend/app`:
 
-  ```yaml
-  with:
-    target-path: app
-  ```
+- endpoints found: 23
+- critical/high findings on protected `CurrentUser` endpoints: 0
+- remaining findings: 2 medium public-entry review notes
 
-### Detection scope
+## v0.4.2
 
-Current MVP focuses on structural security gaps in Python/FastAPI applications:
+### Added
 
-| Public name | Internal metric | Meaning |
-|---|---|---|
-| Слепой переход | `PUBLIC_MUTATION` | State-changing endpoint without visible authentication |
-| Чужой паспорт | `MISSING_OWNERSHIP_BOUNDARY` | User-controlled resource ID without visible ownership check |
-| Голый провод | `RAW_INPUT_TO_SINK` | Raw input reaches SQL/sensitive sink without safe handling |
-| Кнопка без крышки | `CRITICAL_ACTION_WEAK_ZONE` | Payment/admin action exposed without strong permission boundary |
-| Открытая форма | `PUBLIC_ACTION_UNVALIDATED` | Legit public action without visible validation |
+- Upload/plugin boundary detection concept through `UNRESTRICTED_UPLOAD_BOUNDARY`.
+- Static-analysis benchmark fixture for upload boundary regression tests.
+- OWASP/CWE mapping for upload boundary findings.
 
-### Legit public actions
+## v0.4.1
 
-GuardGraph now distinguishes intentionally public endpoints from dangerous public mutations:
+### Added
 
-- `USER_REGISTRATION_ACTION`
-- `AUTH_SESSION_ACTION`
-- `PASSWORD_RESET_ACTION`
-- `PUBLIC_CONTACT_ACTION`
-- `SEARCH_ACTION`
+- OWASP category metadata for findings.
+- CWE metadata for findings.
+- Markdown report rendering of OWASP/CWE metadata.
+- SARIF rule/result metadata for OWASP/CWE fields.
+- GitHub Code Scanning example in README.
 
-### CI behavior
+## v0.4.0
 
-On Pull Requests, GuardGraph can now:
+### Added
 
-1. run tests and structural analysis;
-2. generate JSON and Markdown reports;
-3. add the Markdown report to the workflow summary;
-4. upload reports as artifacts;
-5. create or update a PR comment with the report.
+- SARIF output support.
+- Professional English finding titles alongside display labels.
+- Review-oriented finding fields:
+  - `review_required`
+  - `exploit_confirmed`
+  - `evidence_strength`
 
-### Example workflow
+## v0.3.0
 
-```yaml
-name: GuardGraph
+### Added
 
-on:
-  pull_request:
-  workflow_dispatch:
+- Reusable GitHub Action support.
+- JSON and Markdown report generation.
+- Pull request comment output.
+- Artifact upload support.
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
+## v0.2.0
 
-jobs:
-  guardgraph:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run GuardGraph
-        uses: marieabdlk-art/guardgraph@v0.3.0
-        with:
-          config-path: guardgraph.yml
-          pr-comment: "true"
-          upload-artifacts: "true"
-```
+### Added
 
-### Limitations
+- Threefold structural gap analysis MVP for FastAPI.
+- Initial detection classes:
+  - `PUBLIC_MUTATION`
+  - `MISSING_OWNERSHIP_BOUNDARY`
+  - `RAW_INPUT_TO_SINK`
+  - `CRITICAL_ACTION_WEAK_ZONE`
+  - `PUBLIC_ACTION_UNVALIDATED`
 
-- Python/FastAPI only.
-- Static heuristic analysis, not proof of exploitability.
-- Intra-project AST-based analysis; deeper interprocedural tracking is planned.
-- Findings are structural risk zones and require review in code context.
+## v0.1.0
 
-### Recommended next steps
+### Added
 
-- Add SARIF output.
-- Add configurable thresholds.
-- Add framework plugins for Flask, Django, Express, and Next.js APIs.
-- Add interprocedural data flow and service-layer tracking.
-- Add richer ownership-check recognition.
+- Initial GuardGraph prototype.
