@@ -8,8 +8,8 @@ version = "0.4.3"
 description = "Structural AppSec review action for FastAPI applications"
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{name = "Mariam"}]
-license = {text = "Proprietary"}
+authors = [{name = "A. Abdulkarimova"}]
+license = {text = "MIT"}
 dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
